@@ -1,0 +1,12 @@
+playwright==1.42.0
+beautifulsoup4==4.12.3
+scikit-learn==1.4.2
+spacy==3.7.4
+pdfplumber==0.11.0
+docx2txt==0.8
+gspread==6.0.2
+google-auth==2.29.0
+python-dotenv==1.0.1
+flask==3.0.3
+flask-cors==4.0.0
+flask-jwt-extended==4.6.0

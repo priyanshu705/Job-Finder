@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Secrets & Config
+.env
+*.env.local
+credentials.json
+service-account*.json
+*credentials*.json
+*secret*.json
+
+# Database & Data
+*.db
+*.db-*
+*.sqlite3
+*.sqlite3-*
+data/
+resumes/
+scratch/
+
+# Logs & Debugging
+logs/
+screenshots/
+*.log
+
+# Frontend (Node/React)
+node_modules/
+finder-ui/node_modules/
+finder-ui/.git-nested-backup/
+finder-ui/dist/
+finder-ui/build/
+.eslintcache
+
+# OS Files
+.DS_Store
+Thumbs.db
