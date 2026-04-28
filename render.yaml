@@ -2,16 +2,17 @@ services:
   - type: web
     name: autoapply-ai-backend
     runtime: python
-    region: singapore   # closest to India — lowest latency
+    region: singapore   # closest to India — low latency
     plan: free
 
     # ── Build ────────────────────────────────────────────────────────────────
     buildCommand: |
       pip install -r requirements.txt
+      playwright install --with-deps
 
     # ── Start ────────────────────────────────────────────────────────────────
-    # 1 worker on free tier (512 MB RAM). timeout=120 for long agent cycles.
-    # --preload initialises DB once before forking workers.
+    # 1 worker (free tier limit). timeout increased for long-running jobs.
+    # --preload ensures DB init happens once.
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
 
     # ── Health check ─────────────────────────────────────────────────────────
@@ -31,14 +32,13 @@ services:
       - key: API_HOST
         value: "0.0.0.0"
 
-      # ── Set these in the Render Dashboard → Environment tab ───────────────
-      # Never commit real values here.
+      # ── Set these in Render Dashboard (DO NOT hardcode secrets) ────────────
 
       - key: DATABASE_URL
-        sync: false   # Supabase connection string: postgresql://user:pass@host:5432/postgres
+        sync: false   # e.g. Supabase/Postgres URL
 
       - key: CORS_ORIGINS
-        sync: false   # Your Vercel URL, e.g.: https://autoapply-ai.vercel.app
+        sync: false   # e.g. https://your-frontend.vercel.app
 
       - key: SECRET_KEY
-        generateValue: true   # Render auto-generates a secure random string
+        generateValue: true
