@@ -17,13 +17,11 @@ gspread==6.0.2
 google-auth==2.29.0
 
 # ── Playwright (browser automation — agent only) ──────────────────────────────
-# Installed here so "pip install -r requirements.txt" works everywhere.
-# The actual browser binaries are NOT installed by pip — the agent installs
-# them on-demand via "playwright install chromium" when first run locally.
-# On Render, the agent thread is never started automatically, so this is safe.
 playwright==1.42.0
+# Force compatible greenlet version for Python 3.11+ (prevents C++ build errors)
+greenlet==3.0.3
 
-# ── Document parsing (resume reader — agent only, not needed for API boot) ────
+# ── Document parsing (resume reader — agent only) ──────────────────────────────
 pdfplumber==0.11.0
 docx2txt==0.8
 
