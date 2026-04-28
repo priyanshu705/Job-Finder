@@ -24,6 +24,21 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+@app.route("/")
+def root():
+    return jsonify({
+        "name": "AutoApply AI Backend",
+        "status": "ok",
+        "message": "Backend is running. Use /api/health for health checks.",
+        "endpoints": {
+            "health": "/api/health",
+            "status": "/api/status",
+            "queue": "/api/queue",
+            "agent": "/api/agent/status",
+        },
+        "ts": datetime.now().isoformat(),
+    })
+
 def _cors_origins():
     origins = os.getenv(
         "CORS_ORIGINS",
