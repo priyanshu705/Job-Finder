@@ -1,25 +1,25 @@
 # Backend files are deployed separately on Render.
-src/
-data/
-logs/
-resumes/
-scratch/
-venv/
-__pycache__/
+/src/
+/data/
+/logs/
+/resumes/
+/scratch/
+/venv/
+/__pycache__/
 
 *.db
 *.sqlite3
 *.pyc
 
-.env
-credentials.json
-requirements.txt
-runtime.txt
-render.yaml
-run.py
-setup.py
-wsgi.py
-migrate_db.py
-check.py
-cleanup_dead_files.py
-graphify-out/
+/.env
+/credentials.json
+/requirements.txt
+/runtime.txt
+/render.yaml
+/run.py
+/setup.py
+/wsgi.py
+/migrate_db.py
+/check.py
+/cleanup_dead_files.py
+/graphify-out/

@@ -1,0 +1,8 @@
+{
+  "name": "autoapply-ai-deploy",
+  "private": true,
+  "scripts": {
+    "build": "cd finder-ui && npm run build",
+    "vercel-build": "cd finder-ui && npm run build"
+  }
+}
