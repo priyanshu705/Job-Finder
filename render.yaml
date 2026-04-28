@@ -6,12 +6,12 @@ services:
     plan: free
 
     # ── Build ────────────────────────────────────────────────────────────────
-    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright python -m playwright install --with-deps chromium
+    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --with-deps chromium && PLAYWRIGHT_BROWSERS_PATH=0 python scripts/ensure_playwright.py
 
     # ── Start ────────────────────────────────────────────────────────────────
     # 1 worker (free tier limit). timeout increased for long-running jobs.
-    # --preload ensures DB init happens once.
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
+    # Verify Chromium exists before Gunicorn imports code that can launch Playwright.
+    startCommand: python scripts/ensure_playwright.py && gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
 
     # ── Health check ─────────────────────────────────────────────────────────
     healthCheckPath: /api/health
@@ -31,7 +31,10 @@ services:
         value: "0.0.0.0"
 
       - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/project/src/.playwright
+        value: "0"
+
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "false"
 
       # ── Set these in Render Dashboard (DO NOT hardcode secrets) ────────────
       - key: PYTHON_VERSION
