@@ -2,20 +2,43 @@ services:
   - type: web
     name: autoapply-ai-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 wsgi:app
+    region: singapore   # closest to India — lowest latency
+    plan: free
+
+    # ── Build ────────────────────────────────────────────────────────────────
+    buildCommand: |
+      pip install -r requirements.txt
+
+    # ── Start ────────────────────────────────────────────────────────────────
+    # 1 worker on free tier (512 MB RAM). timeout=120 for long agent cycles.
+    # --preload initialises DB once before forking workers.
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
+
+    # ── Health check ─────────────────────────────────────────────────────────
+    healthCheckPath: /api/health
+
+    # ── Environment variables ────────────────────────────────────────────────
     envVars:
       - key: PYTHONPATH
         value: src
+
       - key: FLASK_ENV
         value: production
+
       - key: FLASK_DEBUG
         value: "0"
-      - key: DATABASE_URL
-        sync: false   # Set this in Render dashboard from Supabase
-      - key: CORS_ORIGINS
-        sync: false   # Set to your Vercel URL e.g. https://autoapply-ai.vercel.app
-      - key: SECRET_KEY
-        generateValue: true
+
       - key: API_HOST
         value: "0.0.0.0"
+
+      # ── Set these in the Render Dashboard → Environment tab ───────────────
+      # Never commit real values here.
+
+      - key: DATABASE_URL
+        sync: false   # Supabase connection string: postgresql://user:pass@host:5432/postgres
+
+      - key: CORS_ORIGINS
+        sync: false   # Your Vercel URL, e.g.: https://autoapply-ai.vercel.app
+
+      - key: SECRET_KEY
+        generateValue: true   # Render auto-generates a secure random string
