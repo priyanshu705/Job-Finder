@@ -8,22 +8,26 @@ gunicorn==22.0.0
 psycopg2-binary==2.9.9
 python-dotenv==1.0.1
 
-# ── Scraping / Automation (used by agent, not needed just to boot the API) ────
-# These are intentionally kept here so "pip install -r requirements.txt" still
-# works in local dev. On Render the build installs ALL of these — that is OK
-# because Render caches the venv between deploys. Playwright browser binaries
-# are NOT installed here; the agent runs headless via a separate task.
-playwright==1.42.0
+# ── HTTP / Scraping ───────────────────────────────────────────────────────────
 beautifulsoup4==4.12.3
-
-# ── ML / NLP ──────────────────────────────────────────────────────────────────
-scikit-learn==1.4.2
-spacy==3.7.4
-
-# ── Document Parsing ─────────────────────────────────────────────────────────
-pdfplumber==0.11.0
-docx2txt==0.8
+requests==2.32.3
 
 # ── Google Integrations ───────────────────────────────────────────────────────
 gspread==6.0.2
 google-auth==2.29.0
+
+# ── Playwright (browser automation — agent only) ──────────────────────────────
+# Installed here so "pip install -r requirements.txt" works everywhere.
+# The actual browser binaries are NOT installed by pip — the agent installs
+# them on-demand via "playwright install chromium" when first run locally.
+# On Render, the agent thread is never started automatically, so this is safe.
+playwright==1.42.0
+
+# ── Document parsing (resume reader — agent only, not needed for API boot) ────
+pdfplumber==0.11.0
+docx2txt==0.8
+
+# ── REMOVED from production ───────────────────────────────────────────────────
+# scikit-learn — replaced with pure-Python TF-IDF in matcher/service.py
+# spacy        — replaced with regex keyword extraction in matcher/service.py
+# numpy        — was only required as a transitive dep of scikit-learn

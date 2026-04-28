@@ -74,30 +74,20 @@ def main():
     packages = {
         "playwright":      "playwright",
         "beautifulsoup4":  "bs4",
-        "scikit-learn":    "sklearn",
-        "spacy":           "spacy",
         "pdfplumber":      "pdfplumber",
         "docx2txt":        "docx2txt",
         "gspread":         "gspread",
         "google-auth":     "google.auth",
         "python-dotenv":   "dotenv",
         "flask":           "flask",
+        "psycopg2-binary": "psycopg2",
     }
     for display_name, import_name in packages.items():
         ok = check(display_name, lambda n=import_name: importlib.import_module(n) is not None)
         if not ok:
             failures += 1
 
-    # ── 3. spaCy model ───────────────────────────────────────────────────
-    print(f"\n{BOLD}[3] spaCy Language Model{RESET}")
-    def check_spacy():
-        import spacy
-        nlp = spacy.load("en_core_web_sm")
-        return f"en_core_web_sm v{nlp.meta.get('version','?')}"
-    ok = check("en_core_web_sm", check_spacy)
-    if not ok:
-        print(f"      {YELLOW}Run: python -m spacy download en_core_web_sm{RESET}")
-        failures += 1
+    # spaCy and scikit-learn removed — pure-Python matching used instead
 
     # ── 4. Playwright browser ────────────────────────────────────────────
     print(f"\n{BOLD}[4] Playwright Browser{RESET}")
