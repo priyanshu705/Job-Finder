@@ -48,9 +48,10 @@ def _cors_origins():
             "http://127.0.0.1:5173",
             "http://localhost:3000",
             "https://autoapply-ai.vercel.app",
+            "https://job-finder-gy068644-8794s-projects.vercel.app/",
         ])
     )
-    configured = [origin.strip() for origin in origins.split(",") if origin.strip()]
+    configured = [origin.strip().rstrip("/") for origin in origins.split(",") if origin.strip()]
     return configured + [re.compile(r"https://.*\.vercel\.app")]
 
 CORS(app, resources={r"/api/*": {"origins": _cors_origins()}}, supports_credentials=True)
