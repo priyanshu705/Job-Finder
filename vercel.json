@@ -1,7 +1,8 @@
 {
   "version": 2,
   "name": "autoapply-ai",
-  "buildCommand": "cd finder-ui && npm install && npm run build",
+  "installCommand": "cd finder-ui && npm ci",
+  "buildCommand": "cd finder-ui && npm run build",
   "outputDirectory": "finder-ui/dist",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
