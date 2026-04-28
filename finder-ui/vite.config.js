@@ -4,12 +4,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
 
-  // ── Dev server ────────────────────────────────────────────────────────────
+  // Dev server
   server: {
     port: 3000,
     proxy: {
-      // Local dev: proxy /api → Flask running on :5000
-      // Production: VITE_API_BASE_URL points directly to Render backend
+      // Local dev: proxy /api to Flask on :5000.
+      // Production uses VITE_API_URL directly in src/api.js.
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
@@ -17,13 +17,11 @@ export default defineConfig({
     },
   },
 
-  // ── Production build ─────────────────────────────────────────────────────
+  // Production build
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // Generate source maps for production debugging (Vercel strips them from
-    // the public bundle — they stay in Vercel's internal storage)
-    sourcemap: true,
+    sourcemap: false,
     rollupOptions: {
       output: {
         // Split large vendor chunks so first load is faster

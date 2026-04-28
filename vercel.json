@@ -1,8 +1,10 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "name": "autoapply-ai",
-  "installCommand": "cd finder-ui && npm ci",
-  "buildCommand": "cd finder-ui && npm run build",
+  "framework": "vite",
+  "installCommand": "npm ci --prefix finder-ui",
+  "buildCommand": "npm run build --prefix finder-ui",
   "outputDirectory": "finder-ui/dist",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
