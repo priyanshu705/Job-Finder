@@ -84,7 +84,10 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
         # Launch browser once
         log.info(f"Launching browser (headless={headless})...")
         _report("init", "Launching browser...", "Launching browser session")
-        browser = pw.chromium.launch(headless=headless)
+        browser = pw.chromium.launch(
+            headless=headless,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
         context = browser.new_context(viewport={"width": 1280, "height": 800})
         page = context.new_page()
 

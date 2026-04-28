@@ -103,7 +103,10 @@ def run_apply_assistant(headless: bool = False, page=None) -> dict:
     if page: _process(page)
     else:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=headless)
+            browser = pw.chromium.launch(
+                headless=headless,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
             ctx = browser.new_context()
             p = ctx.new_page()
             _process(p)

@@ -6,7 +6,7 @@ services:
     plan: free
 
     # ── Build ────────────────────────────────────────────────────────────────
-    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
+    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.playwright python -m playwright install --with-deps chromium
 
     # ── Start ────────────────────────────────────────────────────────────────
     # 1 worker (free tier limit). timeout increased for long-running jobs.
@@ -29,6 +29,9 @@ services:
 
       - key: API_HOST
         value: "0.0.0.0"
+
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/.playwright
 
       # ── Set these in Render Dashboard (DO NOT hardcode secrets) ────────────
       - key: PYTHON_VERSION
