@@ -7,6 +7,7 @@ AutoApply AI — Flask REST API
 import os
 import json
 import logging
+import re
 import threading
 from datetime import datetime, date, timedelta
 
@@ -42,9 +43,15 @@ def root():
 def _cors_origins():
     origins = os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+        ",".join([
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "https://autoapply-ai.vercel.app",
+        ])
     )
-    return [origin.strip() for origin in origins.split(",") if origin.strip()]
+    configured = [origin.strip() for origin in origins.split(",") if origin.strip()]
+    return configured + [re.compile(r"https://.*\.vercel\.app")]
 
 CORS(app, resources={r"/api/*": {"origins": _cors_origins()}}, supports_credentials=True)
 
