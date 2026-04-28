@@ -6,9 +6,7 @@ services:
     plan: free
 
     # ── Build ────────────────────────────────────────────────────────────────
-    buildCommand: |
-      pip install -r requirements.txt
-      playwright install --with-deps chromium
+    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
 
     # ── Start ────────────────────────────────────────────────────────────────
     # 1 worker (free tier limit). timeout increased for long-running jobs.
