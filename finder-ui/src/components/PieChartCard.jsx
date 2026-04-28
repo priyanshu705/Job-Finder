@@ -1,12 +1,12 @@
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 
-const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#f97316', '#3b82f6', '#8b5cf6', '#64748b']
+const COLORS = ['#34d399', '#fbbf24', '#f87171', '#fb923c', '#818cf8', '#c084fc', '#22d3ee']
 
 const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null
   return (
-    <div className="bg-navy-800 border border-slate-600 rounded-xl px-3 py-2 text-xs shadow-card">
-      <p style={{ color: payload[0].payload.fill }} className="font-semibold">
+    <div style={{ background: 'rgba(8,15,31,0.95)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, padding: '8px 12px', fontSize: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.5)', backdropFilter: 'blur(16px)' }}>
+      <p style={{ color: payload[0].payload.fill, fontWeight: 700 }}>
         {payload[0].name}: {payload[0].value} ({payload[0].payload.pct}%)
       </p>
     </div>
@@ -21,11 +21,11 @@ export default function PieChartCard({ title, data = [], loading, sub }) {
     pct: total ? Math.round((d.value / total) * 100) : 0,
   }))
 
-  if (loading) return <div className="card p-5 h-64 skeleton" />
+  if (loading) return <div className="rounded-2xl p-5 h-64 skeleton" style={{ border: '1px solid rgba(255,255,255,0.06)' }} />
   return (
-    <div className="card p-5">
-      <p className="text-sm font-semibold text-slate-200 mb-0.5">{title}</p>
-      {sub && <p className="text-xs text-slate-500 mb-2">{sub}</p>}
+    <div className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(13,21,38,0.92) 0%, rgba(8,15,31,0.96) 100%)', border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)' }}>
+      <p className="text-sm font-semibold mb-0.5" style={{ color: '#e2e8f0' }}>{title}</p>
+      {sub && <p className="text-xs mb-2" style={{ color: 'rgba(100,116,139,0.8)' }}>{sub}</p>}
       {!data.length || total === 0
         ? <div className="h-48 flex items-center justify-center text-slate-500 text-sm">No data yet</div>
         : (
@@ -42,10 +42,10 @@ export default function PieChartCard({ title, data = [], loading, sub }) {
             </ResponsiveContainer>
             <div className="flex flex-col gap-2">
               {enriched.map((entry, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.fill }} />
-                  <span className="text-slate-400">{entry.name}</span>
-                  <span className="font-semibold text-slate-200 ml-auto">{entry.value}</span>
+                <div key={i} className="flex items-center gap-2" style={{ fontSize: 11 }}>
+                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: entry.fill, boxShadow: `0 0 6px ${entry.fill}80` }} />
+                  <span style={{ color: 'rgba(148,163,184,0.8)' }}>{entry.name}</span>
+                  <span className="font-semibold ml-auto" style={{ color: '#e2e8f0' }}>{entry.value}</span>
                 </div>
               ))}
             </div>

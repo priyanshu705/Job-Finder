@@ -54,7 +54,7 @@ def check(label: str, fn: Callable[[], Any]) -> bool:
 
 def main():
     print(f"\n{BOLD}{'='*50}{RESET}")
-    print(f"{BOLD}  Finder V6 — Setup Verification{RESET}")
+    print(f"{BOLD}  AutoApply AI — Setup Verification{RESET}")
     print(f"{BOLD}{'='*50}{RESET}\n")
 
     failures = 0

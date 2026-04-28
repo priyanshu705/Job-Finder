@@ -1,7 +1,7 @@
 """
 src/finder/core/apply_bot/answer_generator.py
 --------------------------------------------
-Production-Grade AI Answer Generator — Finder V6.
+Production-Grade AI Answer Generator — AutoApply AI.
 Strict skill intersection, tone variation, and hallucination prevention.
 """
 

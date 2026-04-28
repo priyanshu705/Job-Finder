@@ -2,7 +2,7 @@ import argparse
 from finder.core.scraper import run_scraper
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Finder V6 — Job Scraper")
+    parser = argparse.ArgumentParser(description="AutoApply AI — Job Scraper")
     parser.add_argument("--query", type=str, default="", help="Search query")
     parser.add_argument("--pages", type=int, default=0, help="Max pages")
     parser.add_argument("--visible", action="store_true", help="Run with visible browser")

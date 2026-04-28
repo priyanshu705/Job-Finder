@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLink, ChevronLeft, ChevronRight, Wand2, Check, X, Copy, Info, Target, CheckCircle, Clock, Phone } from 'lucide-react'
+import { ExternalLink, ChevronLeft, ChevronRight, Wand2, Check, X, Copy, Info, Target, CheckCircle } from 'lucide-react'
 import { api } from '../api.js'
 
 const PAGE_SIZE = 20
@@ -41,7 +41,12 @@ function fmtDate(s) {
 }
 
 function JobAssistantPanel({ job, onClose, onUpdate, nextJob }) {
-  const data = job.assistant_data ? JSON.parse(job.assistant_data) : null
+  let data = null
+  try {
+    data = job.assistant_data
+      ? (typeof job.assistant_data === 'string' ? JSON.parse(job.assistant_data) : job.assistant_data)
+      : null
+  } catch { data = null }
   const [copied, setCopied] = useState(null)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showConfirmation, setShowConfirmation] = useState(false)
@@ -77,13 +82,13 @@ function JobAssistantPanel({ job, onClose, onUpdate, nextJob }) {
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[450px] bg-slate-900 border-l border-slate-700 shadow-2xl z-50 flex flex-col animate-slide-in-right">
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-        <div>
-          <h3 className="font-bold text-slate-100 line-clamp-1">{job.title}</h3>
-          <p className="text-xs text-slate-400">{job.company}</p>
+    <div className="fixed inset-y-0 right-0 w-[460px] z-50 flex flex-col animate-slide-in-right" style={{ background: 'linear-gradient(180deg, rgba(8,15,31,0.99) 0%, rgba(13,21,38,0.99) 100%)', borderLeft: '1px solid rgba(99,102,241,0.25)', boxShadow: '-8px 0 60px rgba(0,0,0,0.7), -2px 0 20px rgba(99,102,241,0.08)', backdropFilter: 'blur(24px)' }}>
+      <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(99,102,241,0.12)', background: 'rgba(99,102,241,0.04)' }}>
+        <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+          <h3 className="font-bold line-clamp-1" style={{ color: '#e2e8f0', fontSize: 15 }}>{job.title}</h3>
+          <p className="text-xs mt-0.5" style={{ color: '#818cf8' }}>{job.company}</p>
         </div>
-        <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-lg text-slate-500"><X size={20} /></button>
+        <button onClick={onClose} className="p-2 rounded-xl transition-all" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(148,163,184,0.7)' }} onMouseEnter={e=>{e.currentTarget.style.background='rgba(248,113,113,0.1)';e.currentTarget.style.color='#f87171'}} onMouseLeave={e=>{e.currentTarget.style.background='rgba(255,255,255,0.04)';e.currentTarget.style.color='rgba(148,163,184,0.7)'}}><X size={18} /></button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-6">
@@ -138,8 +143,8 @@ function JobAssistantPanel({ job, onClose, onUpdate, nextJob }) {
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Elevator Pitch</label>
               <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl relative group hover:border-slate-700">
-                <p className="text-sm text-slate-300 pr-8 italic">"{data.highlights.pitch}"</p>
-                <button onClick={() => copy(data.highlights.pitch, 'pitch')} className="absolute top-2 right-2 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-400">
+                <p className="text-sm text-slate-300 pr-8 italic">"{data.highlights?.pitch ?? '—'}"</p>
+                <button onClick={() => copy(data.highlights?.pitch ?? '', 'pitch')} className="absolute top-2 right-2 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-400">
                   {copied === 'pitch' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                 </button>
               </div>
@@ -149,15 +154,15 @@ function JobAssistantPanel({ job, onClose, onUpdate, nextJob }) {
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Tailored Cover Letter</label>
               <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl relative group hover:border-slate-700">
-                <pre className="text-xs text-slate-400 whitespace-pre-wrap font-sans leading-relaxed">{data.cover_letter}</pre>
-                <button onClick={() => copy(data.cover_letter, 'letter')} className="absolute top-3 right-3 p-1.5 bg-slate-900 border border-slate-700 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-400 shadow-xl">
+                <pre className="text-xs text-slate-400 whitespace-pre-wrap font-sans leading-relaxed">{data.cover_letter ?? ''}</pre>
+                <button onClick={() => copy(data.cover_letter ?? '', 'letter')} className="absolute top-3 right-3 p-1.5 bg-slate-900 border border-slate-700 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-blue-400 shadow-xl">
                   {copied === 'letter' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                 </button>
               </div>
             </div>
 
             {/* Specific Answers */}
-            {Object.keys(data.specific_answers).length > 0 && (
+            {data.specific_answers && Object.keys(data.specific_answers).length > 0 && (
               <div className="space-y-4">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Smart Answers</label>
                 {Object.entries(data.specific_answers).map(([q, a], idx) => (
@@ -178,18 +183,18 @@ function JobAssistantPanel({ job, onClose, onUpdate, nextJob }) {
       </div>
 
       {!showFeedback && !showConfirmation && (
-        <div className="p-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-3">
+        <div className="p-4 flex flex-col gap-3" style={{ borderTop: '1px solid rgba(99,102,241,0.12)', background: 'rgba(2,8,23,0.6)' }}>
           <div className="flex gap-3">
             <button onClick={() => handleAction('applied_manual')} className="flex-1 btn-primary py-2.5 flex items-center justify-center gap-2">
               <Check size={16} /> Mark Applied
             </button>
-            <button onClick={() => handleAction('skipped')} className="flex-1 btn-secondary py-2.5 flex items-center justify-center gap-2 text-red-400 hover:bg-red-500/10 hover:border-red-500/50">
+            <button onClick={() => handleAction('skipped')} className="flex-1 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', color: '#f87171' }}>
               <X size={16} /> Skip
             </button>
           </div>
           <div className="flex gap-2">
-             <button onClick={() => handleAction('interview')} className="flex-1 py-1.5 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-lg text-[10px] uppercase font-bold tracking-wider hover:bg-purple-500/20 transition-colors">Interview</button>
-             <button onClick={() => handleAction('rejected')} className="flex-1 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-[10px] uppercase font-bold tracking-wider hover:bg-red-500/20 transition-colors">Rejected</button>
+             <button onClick={() => handleAction('interview')} className="flex-1 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)', color: '#c084fc' }}>Interview</button>
+             <button onClick={() => handleAction('rejected')} className="flex-1 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)', color: '#f87171' }}>Rejected</button>
           </div>
         </div>
       )}
@@ -254,11 +259,11 @@ export default function QueueTable({ rows = [], loading, onUpdate, hidePaginatio
 
   return (
     <>
-      <div className="card overflow-hidden">
+      <div className="rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(13,21,38,0.92) 0%, rgba(8,15,31,0.96) 100%)', border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 4px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)' }}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px]">
             <thead>
-              <tr className="border-b border-slate-700/50">
+              <tr style={{ borderBottom: '1px solid rgba(99,102,241,0.1)' }}>
                 <th className="table-head">Company</th>
                 <th className="table-head">Role</th>
                 <th className="table-head">Score</th>
@@ -272,7 +277,7 @@ export default function QueueTable({ rows = [], loading, onUpdate, hidePaginatio
                 const isOpened = row.status === 'opened'
                 const isSelected = selectedIndex === i
                 return (
-                  <tr key={row.id || i} className={`table-row ${isNew ? 'bg-blue-500/[0.03]' : ''} ${isOpened ? 'bg-amber-500/[0.02]' : ''} ${isSelected ? 'ring-1 ring-inset ring-blue-500/50 bg-blue-500/[0.05]' : ''}`}>
+                  <tr key={row.id || i} className="transition-all duration-150" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isSelected ? 'rgba(99,102,241,0.08)' : isNew ? 'rgba(99,102,241,0.04)' : isOpened ? 'rgba(251,191,36,0.03)' : 'transparent', outline: isSelected ? '1px solid rgba(99,102,241,0.3)' : 'none', outlineOffset: -1 }} onMouseEnter={e=>{if(!isSelected)e.currentTarget.style.background='rgba(99,102,241,0.05)'}} onMouseLeave={e=>{if(!isSelected)e.currentTarget.style.background=isNew?'rgba(99,102,241,0.04)':isOpened?'rgba(251,191,36,0.03)':'transparent'}}>
                     <td className="table-cell font-medium text-slate-200">
                       <div className="flex items-center gap-2">
                         {isNew && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />}
@@ -323,7 +328,7 @@ export default function QueueTable({ rows = [], loading, onUpdate, hidePaginatio
 
       {selectedJob && (
         <>
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 animate-fade-in" onClick={() => setSelectedIndex(-1)} />
+          <div className="fixed inset-0 z-40 animate-fade-in" style={{ background: 'rgba(2,8,23,0.6)', backdropFilter: 'blur(8px)' }} onClick={() => setSelectedIndex(-1)} />
           <JobAssistantPanel 
             job={selectedJob} 
             onClose={() => setSelectedIndex(-1)} 

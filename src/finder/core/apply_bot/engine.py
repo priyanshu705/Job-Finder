@@ -1,7 +1,7 @@
 """
 src/finder/core/apply_bot/engine.py
 ----------------------------------
-Hardened Application Assistant — Finder V6.
+Hardened Application Assistant — AutoApply AI.
 Rate limits, safety delays, and state consistency.
 """
 

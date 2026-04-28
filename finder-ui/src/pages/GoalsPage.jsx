@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, Trash2, Target, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import PageHeader from '../components/PageHeader.jsx'
 import { api } from '../api.js'
 
 const GOAL_TYPES = [
@@ -69,14 +70,18 @@ export default function GoalsPage() {
   }, {})
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl">
-      <div>
-        <h2 className="section-title">Goals</h2>
-        <p className="section-sub">Define what the agent should target and avoid</p>
-      </div>
+    <div className="space-y-6 max-w-3xl" style={{ animation: 'fadeIn 0.4s ease-out both' }}>
+      <PageHeader title="Goals" sub="Define what the agent should target and avoid" />
 
       {/* Add form */}
-      <div className="card p-5 space-y-4">
+      <div
+        className="p-5 space-y-4 rounded-2xl"
+        style={{
+          background: 'linear-gradient(135deg, rgba(13,21,38,0.92) 0%, rgba(8,15,31,0.96) 100%)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
+        }}
+      >
         <p className="text-sm font-semibold text-slate-200 flex items-center gap-2">
           <Plus size={16} className="text-blue-400" /> Add New Goal
         </p>
@@ -114,9 +119,12 @@ export default function GoalsPage() {
           {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-12 rounded-xl" />)}
         </div>
       ) : !goals.length ? (
-        <div className="card flex flex-col items-center py-12 text-slate-500 gap-3">
-          <Target size={36} className="opacity-30" />
-          <p className="text-sm">No goals defined yet — add your first one above</p>
+        <div
+          className="flex flex-col items-center py-12 gap-3 rounded-2xl"
+          style={{ background: 'rgba(13,21,38,0.6)', border: '1px solid rgba(255,255,255,0.05)' }}
+        >
+          <Target size={36} style={{ opacity: 0.2, color: '#818cf8' }} />
+          <p className="text-sm" style={{ color: 'rgba(100,116,139,0.7)' }}>No goals defined yet — add your first one above</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -124,7 +132,15 @@ export default function GoalsPage() {
             const meta = GOAL_TYPES.find(t => t.value === type)
             const color = TYPE_COLORS[type] || 'text-slate-400'
             return (
-              <div key={type} className="card p-4">
+              <div
+                key={type}
+                className="p-4 rounded-2xl"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(13,21,38,0.92) 0%, rgba(8,15,31,0.96) 100%)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
+                }}
+              >
                 <p className={`text-xs font-bold uppercase tracking-wider mb-3 ${color}`}>
                   {meta?.label || type}
                 </p>

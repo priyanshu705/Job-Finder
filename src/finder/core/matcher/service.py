@@ -1,7 +1,7 @@
 """
 src/finder/core/matcher/service.py
 ---------------------------------
-Resume ↔ Job matcher — Finder V6.
+Resume ↔ Job matcher — AutoApply AI.
 """
 
 import os

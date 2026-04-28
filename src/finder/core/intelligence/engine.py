@@ -1,7 +1,7 @@
 """
 src/finder/core/intelligence/engine.py
 --------------------------------------
-Intelligence & Learning Engine — Finder V6.
+Intelligence & Learning Engine — AutoApply AI.
 """
 
 import os

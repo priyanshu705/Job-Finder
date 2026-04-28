@@ -1,7 +1,7 @@
 """
 run.py
 ------
-Primary entry point for Finder V6.
+Primary entry point for AutoApply AI.
 """
 
 import os
@@ -13,7 +13,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 
 def main():
-    parser = argparse.ArgumentParser(description="Finder V6 — Professional Job Automation")
+    parser = argparse.ArgumentParser(description="AutoApply AI — Intelligent Job Automation")
     parser.add_argument("module", choices=["api", "dashboard", "agent", "setup", "reset", "resume"], help="Module to run")
     parser.add_argument("--once", action="store_true", help="Run once and exit (for agent)")
     parser.add_argument("--no-headless", action="store_true", help="Show the browser during automation")

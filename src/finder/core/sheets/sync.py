@@ -1,7 +1,7 @@
 """
 src/finder/core/sheets/sync.py
 -----------------------------
-Google Sheets Sync — Finder V6.
+Google Sheets Sync — AutoApply AI.
 """
 
 import os
@@ -22,7 +22,7 @@ log = get_logger("sheets")
 # ── Config ────────────────────────────────────────────────────────────────────
 CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "./credentials.json")
 SHEET_ID         = os.getenv("GOOGLE_SHEET_ID", "")
-SHEET_TITLE      = os.getenv("GOOGLE_SHEET_TITLE", "Finder V6 — Job Tracker")
+SHEET_TITLE      = os.getenv("GOOGLE_SHEET_TITLE", "AutoApply AI — Job Tracker")
 
 # Tab names
 TAB_APPLICATIONS = "📋 Applications"

@@ -2,18 +2,10 @@ import { useState, useEffect } from 'react'
 import { LineChartCard, MultiLineChartCard } from '../components/LineChartCard.jsx'
 import BarChartCard from '../components/BarChartCard.jsx'
 import PieChartCard from '../components/PieChartCard.jsx'
+import PageHeader from '../components/PageHeader.jsx'
+import StatCard from '../components/StatCard.jsx'
 import { api } from '../api.js'
-import { TrendingUp, Award, Building2, Zap } from 'lucide-react'
-
-function WeekCard({ label, value, sub, color = 'text-blue-400' }) {
-  return (
-    <div className="card p-4 flex flex-col gap-1">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className={`text-2xl font-bold ${color}`}>{value ?? '—'}</p>
-      {sub && <p className="text-xs text-slate-600">{sub}</p>}
-    </div>
-  )
-}
+import { Building2 } from 'lucide-react'
 
 export default function AnalyticsPage() {
   const [daily,     setDaily]     = useState([])
@@ -33,10 +25,10 @@ export default function AnalyticsPage() {
     }).finally(() => setLoading(false))
   }, [])
 
-  const lineData  = daily.map(r => ({ date: r.date?.slice(5), applied: r.applied || 0, failed: r.failed || 0, uncertain: r.uncertain || 0 }))
+  const lineData  = daily.map(r => ({ date: (r.date || r.day)?.slice(5), applied: r.applied || 0, failed: r.failed || 0, uncertain: r.uncertain || 0 }))
   const rateData  = daily.map(r => {
     const total = (r.applied || 0) + (r.failed || 0)
-    return { date: r.date?.slice(5), rate: total ? Math.round((r.applied / total) * 100) : 0 }
+    return { date: (r.date || r.day)?.slice(5), rate: total ? Math.round((r.applied / total) * 100) : 0 }
   })
 
   // Top companies by applies
@@ -52,18 +44,15 @@ export default function AnalyticsPage() {
     ? Math.round((totalApplied / (totalApplied + totalFailed)) * 100) : 0
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h2 className="section-title">Analytics</h2>
-        <p className="section-sub">30-day performance metrics</p>
-      </div>
+    <div className="space-y-6" style={{ animation: 'fadeIn 0.4s ease-out both' }}>
+      <PageHeader title="Analytics" sub="30-day performance metrics" />
 
-      {/* Weekly summary cards */}
+      {/* Summary stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <WeekCard label="Total Applied"  value={totalApplied}  color="text-emerald-400" sub="all time" />
-        <WeekCard label="Success Rate"   value={`${successRate}%`} color="text-blue-400" sub="applied / attempts" />
-        <WeekCard label="Total Failed"   value={totalFailed}   color="text-red-400"     sub="all time" />
-        <WeekCard label="Total Jobs"     value={s.total_jobs || '—'} color="text-slate-300" sub="scraped" />
+        <StatCard label="Total Applied"  value={totalApplied}        color="green" sub="all time" loading={loading} />
+        <StatCard label="Success Rate"   value={`${successRate}%`}  color="blue"  sub="applied / attempts" loading={loading} />
+        <StatCard label="Total Failed"   value={totalFailed}         color="red"   sub="all time" loading={loading} />
+        <StatCard label="Total Jobs"     value={s.total_jobs || '—'} color="slate" sub="scraped" loading={loading} />
       </div>
 
       {/* Charts */}
@@ -100,7 +89,14 @@ export default function AnalyticsPage() {
 
       {/* Companies table */}
       {topCompanies.length > 0 && (
-        <div className="card p-5">
+        <div
+          className="p-5 rounded-2xl"
+          style={{
+            background: 'linear-gradient(135deg, rgba(13,21,38,0.92) 0%, rgba(8,15,31,0.96) 100%)',
+            border: '1px solid rgba(255,255,255,0.07)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04)',
+          }}
+        >
           <p className="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
             <Building2 size={15} className="text-blue-400" /> Company Intelligence
           </p>

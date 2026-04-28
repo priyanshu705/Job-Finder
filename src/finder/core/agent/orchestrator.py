@@ -1,7 +1,7 @@
 """
 src/finder/core/agent/orchestrator.py
 ------------------------------------
-Master orchestrator — Finder V6.
+Master orchestrator — AutoApply AI.
 Handles the end-to-end cycle: Scrape -> Match -> Queue -> Apply.
 """
 

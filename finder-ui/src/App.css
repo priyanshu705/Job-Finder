@@ -1,3 +1,5 @@
-/* App.css — reset Vite defaults */
-* { box-sizing: border-box; }
-body { margin: 0; }
+/* App.css — reset stale overrides; all styles live in index.css */
+#root {
+  height: 100vh;
+  overflow: hidden;
+}

@@ -2,7 +2,7 @@ import argparse
 from finder.core.matcher import run_matcher
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Finder V6 — Resume Matcher")
+    parser = argparse.ArgumentParser(description="AutoApply AI — Resume Matcher")
     parser.add_argument("--resume", type=str, default="", help="Path to resume")
     parser.add_argument("--min-match", type=float, default=0.0, help="Min match threshold")
     args = parser.parse_args()

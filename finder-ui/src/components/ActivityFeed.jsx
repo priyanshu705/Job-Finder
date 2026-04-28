@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { Zap, Search, CheckCircle, XCircle, AlertCircle, RefreshCw, FileText, Database, Activity } from 'lucide-react'
 import { api } from '../api.js'
 
@@ -34,24 +34,24 @@ function timeAgo(ts) {
   return `${Math.floor(s / 3600)}h ago`
 }
 
-export default function ActivityFeed({ compact = false, limit = 30 }) {
+const ActivityFeed = memo(function ActivityFeed({ compact = false, limit = 30 }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const timerRef = useRef(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const data = await api.activity(limit)
       setItems(Array.isArray(data) ? data : (data.items || data.activity || []))
     } catch { /* silent */ }
     finally { setLoading(false) }
-  }
+  }, [limit])
 
   useEffect(() => {
     load()
     timerRef.current = setInterval(load, 4000)
     return () => clearInterval(timerRef.current)
-  }, [limit])
+  }, [load])
 
   if (loading) return (
     <div className="space-y-3">
@@ -79,21 +79,46 @@ export default function ActivityFeed({ compact = false, limit = 30 }) {
   return (
     <div className="space-y-1">
       {displayed.map((item, i) => {
-        const cfg = getConfig(item.event || item.type || item.action || '')
+        const cfg = getConfig(item.type || item.event || item.action || '')
         const Icon = cfg.icon
-        const msg = item.message || item.detail || item.event || 'Event'
+        // Backend sends `msg`; fall back to other shapes defensively
+        const msg = item.msg || item.message || item.detail || item.event || item.action || '—'
+        // Extract a raw color name for the left border
+        const borderColor = cfg.color.replace('text-', '').replace('-400', '')
         return (
-          <div key={item.id || i} className="flex gap-3 items-start py-2.5 px-1 rounded-xl hover:bg-white/[0.02] transition-colors animate-fade-in">
-            <div className={`w-8 h-8 rounded-xl ${cfg.bg} flex items-center justify-center flex-shrink-0 mt-0.5`}>
-              <Icon size={14} className={cfg.color} />
+          <div
+            key={item.id || i}
+            className="flex gap-3 items-start py-2 px-3 rounded-xl transition-all duration-150"
+            style={{
+              animation: `fadeIn 0.3s ease-out ${i * 0.04}s both`,
+              borderLeft: '2px solid transparent',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(99,102,241,0.05)'
+              e.currentTarget.style.borderLeftColor = 'rgba(99,102,241,0.4)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.borderLeftColor = 'transparent'
+            }}
+          >
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${cfg.bg}`}
+              style={{ border: `1px solid ${cfg.color.includes('blue') ? 'rgba(99,102,241,0.2)' : cfg.color.includes('emerald') ? 'rgba(52,211,153,0.2)' : cfg.color.includes('purple') ? 'rgba(168,85,247,0.2)' : cfg.color.includes('red') ? 'rgba(248,113,113,0.2)' : cfg.color.includes('cyan') ? 'rgba(34,211,238,0.2)' : cfg.color.includes('amber') ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.08)'}` }}
+            >
+              <Icon size={13} className={cfg.color} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm text-slate-200 leading-snug truncate">{msg}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{timeAgo(item.created_at || item.timestamp || item.ts)}</p>
+              <p className="text-sm leading-snug truncate" style={{ color: '#cbd5e1' }}>{msg}</p>
+              <p className="text-xs mt-0.5" style={{ color: 'rgba(100,116,139,0.7)', fontFamily: 'monospace', fontSize: 10 }}>
+                {timeAgo(item.created_at || item.timestamp || item.ts)}
+              </p>
             </div>
           </div>
         )
       })}
     </div>
   )
-}
+})
+
+export default ActivityFeed

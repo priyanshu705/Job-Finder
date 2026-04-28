@@ -1,7 +1,7 @@
 """
 src/finder/cli/dashboard.py
 --------------------------
-Finder V6 — Live Terminal Dashboard
+AutoApply AI — Live Terminal Dashboard
 """
 
 import os
@@ -277,7 +277,7 @@ def render(refresh_interval: int = 5) -> str:
     # ── Header ─────────────────────────────────────────────────────────────
     lines.append(CLEAR_SCREEN)
     lines.append(_header(
-        "  🔍  FINDER V6  —  Intelligent Job Hunter  ",
+        "  🤖  AutoApply AI  —  Intelligent Job Hunter  ",
         f"  {user_name}  ·  {now.strftime('%A, %d %b %Y  %H:%M:%S')}  ·  query: '{query}'  "
     ))
 
@@ -488,7 +488,7 @@ def run_dashboard(refresh: int = 5, once: bool = False) -> None:
                 ch = _cmd_queue.pop(0)
                 if ch == "q":
                     print(SHOW_CURSOR)
-                    print(CLEAR_SCREEN + f"\n{BWHITE}Finder dashboard closed.{RESET}\n")
+                    print(CLEAR_SCREEN + f"\n{BWHITE}AutoApply AI dashboard closed.{RESET}\n")
                     _stop.set()
                     return
 
@@ -549,7 +549,7 @@ def run_dashboard(refresh: int = 5, once: bool = False) -> None:
         print(f"\n{BWHITE}Dashboard closed.{RESET}\n")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Finder V6 — Live Dashboard")
+    parser = argparse.ArgumentParser(description="AutoApply AI — Live Dashboard")
     parser.add_argument("--once",    action="store_true", help="Print once and exit")
     parser.add_argument("--refresh", type=int, default=5, help="Refresh interval in seconds")
     args = parser.parse_args()

@@ -1,4 +1,4 @@
-# Finder V6 — System Check
+# AutoApply AI — System Check
 # Run this to verify all API endpoints are registered correctly
 
 import subprocess, sys
@@ -26,7 +26,7 @@ endpoints = [
     "GET  /api/health",
 ]
 
-print("\n  Finder V6 API Endpoint Checklist")
+print("\n  AutoApply AI API Endpoint Checklist")
 print("  " + "─"*40)
 for ep in endpoints:
     print(f"  ✅  {ep}")

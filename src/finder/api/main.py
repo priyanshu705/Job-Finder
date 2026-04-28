@@ -1,11 +1,12 @@
 """
 src/finder/api/main.py
 ----------------------
-Finder V6 — Flask REST API
+AutoApply AI — Flask REST API
 """
 
 import os
 import json
+import logging
 import threading
 from datetime import datetime, date, timedelta
 
@@ -13,21 +14,25 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from finder.shared.database import get_db
+from finder.shared.database import get_db, _USE_POSTGRES
 from finder.shared.config import LOGS_DIR
 from finder.core.agent import run_agent_cycle
 
 load_dotenv()
 
+log = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
 def _cors_origins():
-    origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    origins = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+    )
     return [origin.strip() for origin in origins.split(",") if origin.strip()]
 
-CORS(app, resources={r"/api/*": {"origins": _cors_origins()}})
+CORS(app, resources={r"/api/*": {"origins": _cors_origins()}}, supports_credentials=True)
 
-# ... (rest of the state logic)
 
 _agent_status = {
     "running":     False,
@@ -60,7 +65,7 @@ def run_agent():
             if len(_agent_status["logs"]) > 20:
                 _agent_status["logs"].pop(0)
 
-    print("Agent started from UI")
+    log.info("Agent cycle started from UI")
     _agent_status["running"] = True
     _agent_status["last_run"] = datetime.now().isoformat()
     _agent_status["error"] = None
@@ -74,12 +79,12 @@ def run_agent():
             _agent_status["last_result"] = results
             _agent_status["phase"] = "done"
             _agent_status["progress"] = "Cycle completed successfully"
-            print("Agent completed")
+            log.info("Agent cycle completed")
         except Exception as e:
             _agent_status["error"] = str(e)
             _agent_status["phase"] = "error"
             _agent_status["progress"] = f"Error: {e}"
-            print(f"Agent failed: {e}")
+            log.error("Agent cycle failed: %s", e)
         finally:
             _agent_status["running"] = False
 
@@ -88,9 +93,18 @@ def run_agent():
 
 CYCLES_LOG = os.path.join(LOGS_DIR, "cycles.jsonl")
 
+def _row_to_dict(r):
+    """Convert a sqlite3.Row or psycopg2 RealDictRow to a plain dict."""
+    if r is None:
+        return {}
+    try:
+        return dict(r)
+    except Exception:
+        return {}
+
 def q(sql, params=()):
     with get_db() as conn:
-        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        return [_row_to_dict(r) for r in (conn.execute(sql, params).fetchall() or [])]
 
 def q1(sql, params=()):
     rows = q(sql, params)
@@ -113,77 +127,102 @@ def update_cycle_state(phase, **kwargs):
 
 @app.route("/api/status")
 def status():
-    controls   = {r["key"]: r["value"] for r in q("SELECT key,value FROM user_controls")}
-    queue_stat = {r["status"]: r["cnt"] for r in
-                  q("SELECT status, COUNT(*) as cnt FROM apply_queue GROUP BY status")}
-    db_counts  = {
-        "jobs":     q1("SELECT COUNT(*) as c FROM jobs")["c"],
-        "queue":    q1("SELECT COUNT(*) as c FROM apply_queue")["c"],
-        "outcomes": q1("SELECT COUNT(*) as c FROM application_outcomes")["c"],
-        "companies":q1("SELECT COUNT(*) as c FROM company_intelligence")["c"],
-    }
-    today = date.today().isoformat()
-    today_stats = q1(
-        """SELECT
-            SUM(CASE WHEN status='applied'   THEN 1 ELSE 0 END) as applied,
-            SUM(CASE WHEN status='uncertain' THEN 1 ELSE 0 END) as uncertain,
-            SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) as failed
-           FROM apply_queue WHERE date(updated_at)=?""", (today,)
-    )
-    manual_req = q1("SELECT value FROM user_controls WHERE key='manual_verification_required'")
-    
-    return jsonify({
-        "controls":    controls,
-        "queue":       queue_stat,
-        "db_counts":   db_counts,
-        "today":       today_stats,
-        "manual_verification_required": manual_req.get("value") if manual_req else None,
-        "timestamp":   datetime.now().isoformat(),
-    })
+    try:
+        controls   = {r["key"]: r["value"] for r in q("SELECT key,value FROM user_controls")}
+        queue_stat = {r["status"]: r["cnt"] for r in
+                      q("SELECT status, COUNT(*) as cnt FROM apply_queue GROUP BY status")}
+        db_counts  = {
+            "jobs":     q1("SELECT COUNT(*) as c FROM jobs").get("c", 0),
+            "queue":    q1("SELECT COUNT(*) as c FROM apply_queue").get("c", 0),
+            "outcomes": q1("SELECT COUNT(*) as c FROM application_outcomes").get("c", 0),
+            "companies":q1("SELECT COUNT(*) as c FROM company_intelligence").get("c", 0),
+        }
+        today = date.today().isoformat()
+        # Use Python-side date comparison — works on both SQLite and PostgreSQL
+        _today_start = today + " 00:00:00"
+        _today_end   = today + " 23:59:59"
+        today_stats = q1(
+            """SELECT
+                SUM(CASE WHEN status='applied'   THEN 1 ELSE 0 END) as applied,
+                SUM(CASE WHEN status='uncertain' THEN 1 ELSE 0 END) as uncertain,
+                SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) as failed
+               FROM apply_queue WHERE updated_at BETWEEN ? AND ?""",
+            (_today_start, _today_end),
+        )
+        manual_req = q1("SELECT value FROM user_controls WHERE key='manual_verification_required'")
+        return jsonify({
+            "controls":    controls,
+            "queue":       queue_stat,
+            "db_counts":   db_counts,
+            "today":       today_stats,
+            "manual_verification_required": manual_req.get("value") if manual_req else None,
+            "timestamp":   datetime.now().isoformat(),
+        })
+    except Exception as e:
+        log.error("/api/status error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/queue")
 def queue():
-    status_filter = request.args.get("status", "")
-    sort_mode     = request.args.get("sort", "priority")
-    limit         = int(request.args.get("limit", 50))
-    offset        = int(request.args.get("offset", 0))
-    search_q      = request.args.get("q", "")
+    try:
+        status_filter = request.args.get("status", "")
+        sort_mode     = request.args.get("sort", "priority")
+        limit         = min(int(request.args.get("limit", 50)), 200)  # cap at 200
+        offset        = int(request.args.get("offset", 0))
+        search_q      = request.args.get("q", "")
+        min_score     = request.args.get("min_score", "")
+        company       = request.args.get("company", "")
 
-    where_clauses = ["1=1"]
-    params = []
+        where_clauses = ["1=1"]
+        params = []
 
-    if status_filter:
-        where_clauses.append("q.status=?")
-        params.append(status_filter)
-    
-    if search_q:
-        where_clauses.append("(j.title LIKE ? OR j.company LIKE ?)")
-        params.extend([f"%{search_q}%", f"%{search_q}%"])
+        if status_filter:
+            where_clauses.append("q.status=?")
+            params.append(status_filter)
 
-    where = "WHERE " + " AND ".join(where_clauses)
+        if search_q:
+            where_clauses.append("(j.title LIKE ? OR j.company LIKE ?)")
+            params.extend([f"%{search_q}%", f"%{search_q}%"])
 
-    order = (
-        "q.queued_at DESC"
-        if sort_mode == "latest"
-        else "q.goal_boost DESC NULLS LAST, q.match_score_at_apply DESC NULLS LAST, q.queued_at DESC"
-    )
+        if min_score:
+            try:
+                where_clauses.append("q.match_score_at_apply >= ?")
+                params.append(float(min_score))
+            except ValueError:
+                pass
 
-    rows = q(f"""
-        SELECT q.id, q.status, q.match_score_at_apply, q.goal_boost,
-               q.risk_score, q.is_exploration, q.attempts,
-               q.queued_at, q.updated_at, q.last_error, q.assistant_data,
-               q.relevance_feedback,
-               j.title, j.company, j.platform, j.location,
-               j.salary, j.skills, j.form_type, j.posted_at, j.job_url
-        FROM apply_queue q
-        LEFT JOIN jobs j ON j.job_url = q.job_url
-        {where}
-        ORDER BY {order}
-        LIMIT ? OFFSET ?
-    """, params + [limit, offset])
+        if company:
+            where_clauses.append("j.company LIKE ?")
+            params.append(f"%{company}%")
 
-    total = q1(f"SELECT COUNT(*) as c FROM apply_queue q LEFT JOIN jobs j ON j.job_url = q.job_url {where}", params)["c"]
-    return jsonify({"jobs": rows, "total": total, "limit": limit, "offset": offset})
+        where = "WHERE " + " AND ".join(where_clauses)
+
+        order = (
+            "q.queued_at DESC"
+            if sort_mode == "latest"
+            else "q.goal_boost DESC NULLS LAST, q.match_score_at_apply DESC NULLS LAST, q.queued_at DESC"
+        )
+
+        rows = q(f"""
+            SELECT q.id, q.status, q.match_score_at_apply, q.goal_boost,
+                   q.risk_score, q.is_exploration, q.attempts,
+                   q.queued_at, q.updated_at, q.last_error, q.assistant_data,
+                   q.relevance_feedback,
+                   j.title, j.company, j.platform, j.location,
+                   j.salary, j.skills, j.form_type, j.posted_at, j.job_url
+            FROM apply_queue q
+            LEFT JOIN jobs j ON j.job_url = q.job_url
+            {where}
+            ORDER BY {order}
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset])
+
+        total = q1(f"SELECT COUNT(*) as c FROM apply_queue q LEFT JOIN jobs j ON j.job_url = q.job_url {where}", params).get("c", 0)
+        return jsonify({"jobs": rows, "total": total, "limit": limit, "offset": offset})
+    except Exception as e:
+        log.error("/api/queue error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/stats/overview")
 def stats_overview():
@@ -219,17 +258,58 @@ def update_feedback(job_id):
 
 @app.route("/api/demo/seed", methods=["POST"])
 def seed_demo_data():
-    with get_db() as conn:
-        # Sample jobs for demo
-        jobs = [
-            ("QA Automation Engineer", "TechCorp", "Internshala", "Remote", "Python, Selenium, Playwright", "6-8 LPA", "https://demo.com/1"),
-            ("Python Backend Developer", "DataSoft", "Internshala", "Bangalore", "FastAPI, SQL, Docker", "5-7 LPA", "https://demo.com/2"),
-            ("Junior Software Tester", "QualityFirst", "Internshala", "Remote", "Manual Testing, Jira", "4-6 LPA", "https://demo.com/3")
+    """Seed realistic demo data — idempotent, safe to call multiple times."""
+    try:
+        # (title, company, platform, location, skills, salary, url, status, score, ai_json)
+        DEMO_JOBS = [
+            ("Senior QA Automation Engineer", "Razorpay",   "Internshala", "Remote",    "Python, Selenium, Playwright, CI/CD",   "12-18 LPA", "https://demo.com/1", "applied",   92.0, '{"summary":"Strong match. Applied automatically.","why":"Skills align 92%."}'),
+            ("Python Backend Developer",      "Groww",      "LinkedIn",    "Bangalore", "FastAPI, PostgreSQL, Redis, Docker",     "10-15 LPA", "https://demo.com/2", "interview", 88.0, '{"summary":"Excellent fit. Interview scheduled.","why":"Backend exp matches perfectly."}'),
+            ("Automation Test Engineer",      "PhonePe",    "Internshala", "Hyderabad", "Selenium, TestNG, Java, JIRA",          "8-12 LPA",  "https://demo.com/3", "applied",   85.0, '{"summary":"Good match. Applied.","why":"Testing skills match 85%."}'),
+            ("Junior Software Tester",        "Infosys",    "Internshala", "Pune",      "Manual Testing, Selenium, Agile",       "4-6 LPA",   "https://demo.com/4", "pending",   78.0, '{"summary":"Solid entry-level fit.","why":"Testing background fits."}'),
+            ("SDET Engineer",                 "Flipkart",   "LinkedIn",    "Bangalore", "Python, Robot Framework, API Testing",  "14-20 LPA", "https://demo.com/5", "pending",   81.0, '{"summary":"Strong technical match.","why":"Python + API testing = great fit."}'),
+            ("Test Automation Lead",          "Zomato",     "Naukri",      "Remote",    "Playwright, Cypress, TypeScript",       "18-25 LPA", "https://demo.com/6", "pending",   74.0, '{"summary":"Partial match.","why":"Automation skills relevant."}'),
+            ("Backend Engineer - Python",     "Cred",       "LinkedIn",    "Bangalore", "Python, Django, REST APIs, AWS",        "12-16 LPA", "https://demo.com/7", "failed",    69.0, '{"summary":"Below threshold.","why":"AWS skills gap."}'),
+            ("QA Engineer - Mobile",          "Meesho",     "Internshala", "Remote",    "Appium, Android Testing, Python",       "7-10 LPA",  "https://demo.com/8", "applied",   83.0, '{"summary":"Good mobile testing match.","why":"Python + Appium = strong fit."}'),
         ]
-        for j in jobs:
-            conn.execute("INSERT OR IGNORE INTO jobs (title, company, platform, location, skills, salary, job_url) VALUES (?,?,?,?,?,?,?)", j)
-            conn.execute("INSERT OR IGNORE INTO apply_queue (job_url, status, match_score_at_apply) VALUES (?, 'pending', 85)", (j[6],))
-    return jsonify({"seeded": True})
+
+        _job_upsert = (
+            "INSERT INTO jobs (title, company, platform, location, skills, salary, job_url) "
+            "VALUES (?,?,?,?,?,?,?) ON CONFLICT (job_url) DO NOTHING"
+            if _USE_POSTGRES else
+            "INSERT OR IGNORE INTO jobs (title, company, platform, location, skills, salary, job_url) VALUES (?,?,?,?,?,?,?)"
+        )
+        _q_upsert = (
+            "INSERT INTO apply_queue (job_url, status, match_score_at_apply, goal_boost, attempts, assistant_data, updated_at) "
+            "VALUES (?,?,?,1.1,1,?,CURRENT_TIMESTAMP) ON CONFLICT (job_url) DO NOTHING"
+            if _USE_POSTGRES else
+            "INSERT OR IGNORE INTO apply_queue (job_url, status, match_score_at_apply, goal_boost, attempts, assistant_data, updated_at) "
+            "VALUES (?,?,?,1.1,1,?,CURRENT_TIMESTAMP)"
+        )
+        _ci_upsert = (
+            "INSERT INTO company_intelligence (company, tier, total_applies, interview_rate, response_rate) "
+            "VALUES (?,?,?,?,?) ON CONFLICT (company) DO NOTHING"
+            if _USE_POSTGRES else
+            "INSERT OR IGNORE INTO company_intelligence (company, tier, total_applies, interview_rate, response_rate) "
+            "VALUES (?,?,?,?,?)"
+        )
+
+        with get_db() as conn:
+            for title, company, platform, loc, skills, salary, url, status, score, ai in DEMO_JOBS:
+                conn.execute(_job_upsert, (title, company, platform, loc, skills, salary, url))
+                conn.execute(_q_upsert, (url, status, score, ai))
+            for company, tier, applies, irate, rrate in [
+                ("Razorpay", "A", 4, 0.50, 0.75), ("Groww",    "A", 3, 0.67, 0.80),
+                ("PhonePe",  "A", 2, 0.50, 0.60), ("Flipkart", "B", 5, 0.40, 0.55),
+                ("Zomato",   "B", 3, 0.33, 0.45), ("Infosys",  "B", 6, 0.17, 0.40),
+                ("Meesho",   "B", 2, 0.50, 0.65), ("Cred",     "A", 1, 0.00, 0.30),
+            ]:
+                conn.execute(_ci_upsert, (company, tier, applies, irate, rrate))
+
+        return jsonify({"seeded": True, "jobs": len(DEMO_JOBS)})
+    except Exception as e:
+        log.error("/api/demo/seed error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/jobs")
 def jobs():
@@ -257,45 +337,73 @@ def jobs():
 
 @app.route("/api/stats/daily")
 def stats_daily():
-    days  = int(request.args.get("days", 30))
-    since = (date.today() - timedelta(days=days)).isoformat()
+    try:
+        days  = int(request.args.get("days", 30))
+        since = (date.today() - timedelta(days=days)).isoformat()
 
-    daily = q("""
-        SELECT date(updated_at) as day,
-               SUM(CASE WHEN status='applied' OR status='applied_manual' THEN 1 ELSE 0 END) as applied,
-               SUM(CASE WHEN status='interview' THEN 1 ELSE 0 END) as interviews
-        FROM apply_queue
-        WHERE updated_at >= ? AND updated_at IS NOT NULL
-        GROUP BY day ORDER BY day ASC
-    """, (since,))
+        # CAST to DATE works on both SQLite and PostgreSQL
+        daily = q("""
+            SELECT CAST(updated_at AS DATE) as date,
+                   SUM(CASE WHEN status='applied' OR status='applied_manual' THEN 1 ELSE 0 END) as applied,
+                   SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) as failed,
+                   SUM(CASE WHEN status='uncertain' THEN 1 ELSE 0 END) as uncertain,
+                   SUM(CASE WHEN status='interview' THEN 1 ELSE 0 END) as interviews
+            FROM apply_queue
+            WHERE updated_at >= ? AND updated_at IS NOT NULL
+            GROUP BY CAST(updated_at AS DATE)
+            ORDER BY CAST(updated_at AS DATE) ASC
+        """, (since,))
 
-    scraped = q("""
-        SELECT date(scraped_at) as day, COUNT(*) as scraped
-        FROM jobs WHERE scraped_at >= ?
-        GROUP BY date(scraped_at)
-    """, (since,))
-    scraped_map = {r["day"]: r["scraped"] for r in scraped}
+        scraped = q("""
+            SELECT CAST(scraped_at AS DATE) as day, COUNT(*) as scraped
+            FROM jobs WHERE scraped_at >= ?
+            GROUP BY CAST(scraped_at AS DATE)
+        """, (since,))
+        scraped_map = {str(r["day"]): r["scraped"] for r in scraped}
 
-    for row in daily:
-        row["scraped"] = scraped_map.get(row["day"], 0)
+        for row in daily:
+            row["date"] = str(row["date"])  # ensure string for JSON
+            row["scraped"] = scraped_map.get(row["date"], 0)
 
-    return jsonify(daily)
+        return jsonify(daily)
+    except Exception as e:
+        log.error("/api/stats/daily error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/stats/summary")
 def stats_summary():
-    since = (date.today() - timedelta(days=7)).isoformat()
-    row   = q1("""
-        SELECT COUNT(*) as total,
-               SUM(CASE WHEN status='applied' OR status='applied_manual' THEN 1 ELSE 0 END) as applied,
-               SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) as failed,
-               SUM(CASE WHEN status='uncertain' THEN 1 ELSE 0 END) as uncertain,
-               SUM(CASE WHEN status='skip' OR status='skipped' THEN 1 ELSE 0 END) as skipped,
-               AVG(match_score_at_apply) as avg_score
-        FROM apply_queue
-        WHERE updated_at >= ?
-    """, (since,))
-    total_applied = (row.get("applied") or 0) + (row.get("uncertain") or 0)
-    return jsonify({**row, "total_applied": total_applied, "period_days": 7})
+    try:
+        since = (date.today() - timedelta(days=7)).isoformat()
+        row   = q1("""
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN status='applied' OR status='applied_manual' THEN 1 ELSE 0 END) as applied,
+                   SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END) as failed,
+                   SUM(CASE WHEN status='uncertain' THEN 1 ELSE 0 END) as uncertain,
+                   SUM(CASE WHEN status='skip' OR status='skipped' THEN 1 ELSE 0 END) as skipped,
+                   AVG(match_score_at_apply) as avg_score
+            FROM apply_queue
+            WHERE updated_at >= ?
+        """, (since,))
+        alltime = q1("""
+            SELECT COUNT(*) as total_jobs,
+                   SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending,
+                   SUM(CASE WHEN status='interview' THEN 1 ELSE 0 END) as interviews
+            FROM apply_queue
+        """)
+        total_applied = (row.get("applied") or 0) + (row.get("uncertain") or 0)
+        return jsonify({
+            **row,
+            "total_applied": total_applied,
+            "period_days":   7,
+            "pending":       alltime.get("pending") or 0,
+            "interviews":    alltime.get("interviews") or 0,
+            "total_jobs":    alltime.get("total_jobs") or 0,
+        })
+    except Exception as e:
+        log.error("/api/stats/summary error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/goals", methods=["GET"])
 def get_goals():
@@ -309,13 +417,25 @@ def add_goal():
     prio  = int(data.get("priority", 5))
     if not value:
         return jsonify({"error": "value required"}), 400
-    with get_db() as conn:
-        cur = conn.execute(
-            "INSERT INTO user_goals (goal_type,value,priority,active) VALUES(?,?,?,1)",
-            (gtype, value, prio)
-        )
-        gid = cur.lastrowid
-    return jsonify({"id": gid, "goal_type": gtype, "value": value, "priority": prio}), 201
+    try:
+        if _USE_POSTGRES:
+            # RETURNING id is required — psycopg2 doesn't populate lastrowid
+            rows = q(
+                "INSERT INTO user_goals (goal_type,value,priority,active) VALUES(?,?,?,1) RETURNING id",
+                (gtype, value, prio)
+            )
+            gid = rows[0]["id"] if rows else None
+        else:
+            with get_db() as conn:
+                cur = conn.execute(
+                    "INSERT INTO user_goals (goal_type,value,priority,active) VALUES(?,?,?,1)",
+                    (gtype, value, prio)
+                )
+                gid = cur.lastrowid
+        return jsonify({"id": gid, "goal_type": gtype, "value": value, "priority": prio}), 201
+    except Exception as e:
+        log.error("/api/goals POST error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/goals/<int:gid>", methods=["DELETE"])
 def delete_goal(gid):
@@ -337,33 +457,37 @@ def companies():
 
 @app.route("/api/insights")
 def insights():
-    best_skills = q("""
-        SELECT skill,
-               SUM(CASE WHEN outcome IN ('applied','interview','offer')
-                   THEN count ELSE 0 END) as positive,
-               SUM(count) as total
-        FROM skill_outcome_map GROUP BY skill
-        HAVING total>=1 ORDER BY positive DESC LIMIT 10
-    """)
-    threshold_hist = q("""
-        SELECT date, threshold, success_rate, applied, failed
-        FROM threshold_history ORDER BY date DESC LIMIT 10
-    """)
-    failure_pat = q("""
-        SELECT module, error_type, platform, hour_of_day, SUM(count) as count
-        FROM failure_patterns GROUP BY module, error_type, platform, hour_of_day
-        ORDER BY count DESC LIMIT 10
-    """)
-    outcomes = q("""
-        SELECT outcome, COUNT(*) as cnt FROM application_outcomes
-        GROUP BY outcome ORDER BY cnt DESC
-    """)
-    return jsonify({
-        "best_skills":      best_skills,
-        "threshold_history":threshold_hist,
-        "failure_patterns": failure_pat,
-        "outcomes":         outcomes,
-    })
+    try:
+        best_skills = q("""
+            SELECT skill,
+                   SUM(CASE WHEN outcome IN ('applied','interview','offer')
+                       THEN count ELSE 0 END) as positive,
+                   SUM(count) as total
+            FROM skill_outcome_map GROUP BY skill
+            HAVING total>=1 ORDER BY positive DESC LIMIT 10
+        """)
+        threshold_hist = q("""
+            SELECT date, threshold, success_rate, applied, failed
+            FROM threshold_history ORDER BY date DESC LIMIT 10
+        """)
+        failure_pat = q("""
+            SELECT module, error_type, platform, hour_of_day, SUM(count) as count
+            FROM failure_patterns GROUP BY module, error_type, platform, hour_of_day
+            ORDER BY count DESC LIMIT 10
+        """)
+        outcomes = q("""
+            SELECT outcome, COUNT(*) as cnt FROM application_outcomes
+            GROUP BY outcome ORDER BY cnt DESC
+        """)
+        return jsonify({
+            "best_skills":      best_skills,
+            "threshold_history":threshold_hist,
+            "failure_patterns": failure_pat,
+            "outcomes":         outcomes,
+        })
+    except Exception as e:
+        log.error("/api/insights error: %s", e)
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/controls", methods=["GET"])
 def get_controls():
@@ -529,19 +653,21 @@ def activity():
         })
 
     try:
+        # Use Python-computed threshold — works on both SQLite and PostgreSQL
+        _since = (datetime.utcnow() - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
         recent = q("""
             SELECT q.status, q.updated_at, j.title, j.company
             FROM apply_queue q
             LEFT JOIN jobs j ON j.job_url = q.job_url
             WHERE q.status IN ('applied','uncertain','failed')
-              AND q.updated_at >= datetime('now','-30 minutes')
+              AND q.updated_at >= ?
             ORDER BY q.updated_at DESC LIMIT 10
-        """)
+        """, (_since,))
         for r in recent:
             icon  = "✅" if r["status"] == "applied" else "⚠️" if r["status"] == "uncertain" else "❌"
             level = "success" if r["status"] == "applied" else "warn" if r["status"] == "uncertain" else "error"
             events.insert(0, {
-                "ts":    r["updated_at"] or "",
+                "ts":    str(r["updated_at"]) if r["updated_at"] else "",
                 "type":  r["status"],
                 "msg":   f"{icon} {r['status'].title()}: {r['title'] or '?'} @ {r['company'] or '?'}",
                 "icon":  icon,
@@ -566,10 +692,44 @@ def cycle_status():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"status": "ok", "version": "6.0", "ts": datetime.now().isoformat()})
+    db_status = "disconnected"
+    try:
+        with get_db() as conn:
+            conn.execute("SELECT 1").fetchone()
+        db_status = "connected"
+    except Exception as e:
+        log.warning("Health DB probe failed: %s", e)
+    return jsonify({
+        "status": "ok" if db_status == "connected" else "degraded",
+        "name": "AutoApply AI",
+        "version": "3.0",
+        "db": db_status,
+        "ts": datetime.now().isoformat(),
+    })
+
+# ── Global error handlers — always return JSON, never HTML tracebacks ─────────
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "endpoint not found"}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"error": "method not allowed"}), 405
+
+@app.errorhandler(500)
+def internal_error(e):
+    log.error("Unhandled 500: %s", e)
+    return jsonify({"error": "internal server error"}), 500
+
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    log.error("Unhandled exception: %s", e, exc_info=True)
+    return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.getenv("API_PORT", "5000"))
-    host = os.getenv("API_HOST", "127.0.0.1")
+    host = os.getenv("API_HOST", "0.0.0.0")
     debug = os.getenv("FLASK_DEBUG", "0").lower() in {"1", "true", "yes"}
     app.run(host=host, port=port, debug=debug, use_reloader=debug)

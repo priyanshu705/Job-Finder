@@ -1,7 +1,7 @@
 """
 src/finder/core/scraper/service.py
 ---------------------------------
-Internshala job scraper — Finder V6.
+Internshala job scraper — AutoApply AI.
 """
 
 import os
