@@ -27,10 +27,12 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Split large vendor chunks so first load is faster
-        manualChunks: {
-          react:    ['react', 'react-dom'],
-          recharts: ['recharts'],
-          lucide:   ['lucide-react'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('react')) return 'react'
+          if (id.includes('recharts')) return 'recharts'
+          if (id.includes('lucide-react')) return 'lucide'
+          return 'vendor'
         },
       },
     },
