@@ -2,141 +2,168 @@
 src/finder/core/apply_bot/engine.py
 ----------------------------------
 Hardened Application Assistant — AutoApply AI.
-Rate limits, safety delays, and state consistency.
+Opens job pages for human review without blocking the agent cycle.
 """
 
 import os
 import json
 import time
-import sys
 import random
 from playwright.sync_api import sync_playwright, Page
 from finder.shared.logger import get_logger
 from finder.shared.database import get_db
-from finder.core.apply_bot.answer_generator import generate_smart_answers
+from finder.core.apply_bot.answer_generator import generate_smart_answers  # single source of truth
 
 log = get_logger("apply_assistant")
 
 # Constants
 MAX_JOBS_PER_RUN = 5
-ACTION_DELAY_SEC = (2, 5)
+ACTION_DELAY_SEC = (1, 3)
 
-def _update_job_status(job_id, status, error=None):
+
+def _update_job_status(job_id: int, status: str, error: str = None) -> None:
+    """Atomically update a job's status in the queue."""
     with get_db() as conn:
         conn.execute(
             "UPDATE apply_queue SET status=?, last_error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (status, error, job_id)
         )
 
-def detect_verification(page: Page):
-    content = page.content().lower()
-    for p in ["verify you are human", "captcha", "robot", "blocked"]:
-        if p in content: return p
+
+def _ensure_assistant_data(job: dict) -> dict:
+    """
+    Return existing assistant_data (parsed) if valid, otherwise generate
+    fresh data, persist it to DB, and return it.
+    """
+    raw = job.get("assistant_data")
+    if raw:
+        try:
+            existing = json.loads(raw) if isinstance(raw, str) else raw
+            # Validate it has the key fields the UI needs
+            if existing.get("cover_letter") or existing.get("explanation"):
+                return existing
+        except Exception:
+            pass  # corrupt JSON — fall through to regenerate
+
+    log.info(f"Generating assistant data for: {job.get('title','?')} @ {job.get('company','?')}")
+    ai_data = generate_smart_answers(job)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE apply_queue SET assistant_data=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (json.dumps(ai_data), job["id"])
+        )
+    return ai_data
+
+
+def detect_verification(page: Page) -> str | None:
+    """Check if a verification/CAPTCHA wall is present."""
+    try:
+        content = page.content().lower()
+        for pattern in ["verify you are human", "captcha", "robot check", "blocked"]:
+            if pattern in content:
+                return pattern
+    except Exception:
+        pass
     return None
 
-def run_apply_assistant(headless: bool = False, page=None) -> dict:
-    log.info("🚀 Starting Hardened Apply Assistant Cycle...")
-    
+
+def run_apply_assistant(headless: bool = False, page: Page = None) -> dict:
+    """
+    Opens each 'ready_to_apply' job in the browser for human review.
+    Marks jobs as 'opened' and ensures assistant_data is generated.
+    Does NOT block waiting for human confirmation — that is handled
+    asynchronously via the UI status update endpoints.
+    """
+    log.info("🚀 Starting Apply Assistant Cycle...")
+
+    # Fetch eligible jobs
     with get_db() as conn:
-        threshold = float(conn.execute("SELECT value FROM user_controls WHERE key='min_match'").fetchone()[0])
+        row = conn.execute(
+            "SELECT value FROM user_controls WHERE key='min_match'"
+        ).fetchone()
+        threshold = float(row["value"]) if row else 70.0
+
         jobs = [dict(r) for r in conn.execute(
-            "SELECT q.id, q.job_url, q.assistant_data, j.title, j.company, j.skills FROM apply_queue q "
-            "JOIN jobs j ON j.job_url = q.job_url "
-            "WHERE q.status IN ('pending', 'ready_to_apply', 'opened') AND q.match_score_at_apply >= ? "
-            "ORDER BY q.match_score_at_apply DESC LIMIT ?", 
+            """
+            SELECT q.id, q.job_url, q.assistant_data, q.match_score_at_apply,
+                   j.title, j.company, j.skills, j.description
+            FROM apply_queue q
+            JOIN jobs j ON j.job_url = q.job_url
+            WHERE q.status = 'ready_to_apply'
+              AND (q.match_score_at_apply IS NULL OR q.match_score_at_apply >= ?)
+            ORDER BY q.match_score_at_apply DESC
+            LIMIT ?
+            """,
             (threshold, MAX_JOBS_PER_RUN)
         ).fetchall()]
 
     if not jobs:
-        log.info("No eligible jobs found in queue.")
-        return {"count": 0}
+        log.info("No eligible ready_to_apply jobs found.")
+        return {"opened": 0, "assistant_generated": 0, "safety_stops": 0, "errors": 0}
 
-    stats = {"processed": 0, "applied": 0, "safety_stops": 0}
+    stats = {"opened": 0, "assistant_generated": 0, "safety_stops": 0, "errors": 0}
 
-    def _process(p: Page):
+    def _process(p: Page) -> None:
         for job in jobs:
-            log.info(f"👉 Processing: {job['title']} @ {job['company']}")
-            
-            # Safety Delay
-            delay = random.uniform(*ACTION_DELAY_SEC) if 'random' in globals() else 3
+            log.info(f"👉 Opening: {job['title']} @ {job['company']}")
+
+            # Safety delay between jobs
+            delay = random.uniform(*ACTION_DELAY_SEC)
             time.sleep(delay)
 
             try:
-                p.goto(job['job_url'], wait_until="networkidle")
-                
-                # Check for verification
+                p.goto(job["job_url"], wait_until="domcontentloaded", timeout=30_000)
+
+                # CAPTCHA / verification guard
                 challenge = detect_verification(p)
                 if challenge:
-                    log.warning(f"🛑 SAFETY STOP: Verification detected ({challenge})")
-                    _update_job_status(job['id'], 'verification_required', challenge)
-                    stats['safety_stops'] += 1
-                    break # Stop entire cycle for safety
+                    log.warning(f"🛑 Verification detected ({challenge}). Stopping cycle.")
+                    _update_job_status(job["id"], "verification_required", challenge)
 
-                # State Consistency: Mark as 'opened' for human review
-                _update_job_status(job['id'], 'opened')
-                
-                # Pre-generate answers if missing
-                if not job.get('assistant_data'):
-                    ai_data = generate_smart_answers(job)
+                    # Signal to API layer that manual action is needed
                     with get_db() as conn:
-                        conn.execute("UPDATE apply_queue SET assistant_data=? WHERE id=?", (json.dumps(ai_data), job['id']))
+                        conn.execute(
+                            "INSERT OR REPLACE INTO user_controls (key, value) VALUES (?, ?)",
+                            ("manual_verification_required", challenge)
+                        )
+                    stats["safety_stops"] += 1
+                    break  # Stop entire cycle for safety
 
-                # Wait for user via DB polling (consistent with UI actions)
-                # In production, we'd wait for a 'confirm_applied' status
-                stats['processed'] += 1
-                log.info(f"Waiting for human action on {job['company']}...")
-                
-                # For this hardened version, we'll wait up to 5 mins per job
-                wait_start = time.time()
-                while time.time() - wait_start < 300:
-                    with get_db() as conn:
-                        row = conn.execute("SELECT status FROM apply_queue WHERE id=?", (job['id'],)).fetchone()
-                        if row['status'] in ['applied_manual', 'skipped']:
-                            if row['status'] == 'applied_manual': stats['applied'] += 1
-                            break
-                    time.sleep(2)
-                
+                # Pre-generate / ensure assistant_data BEFORE marking opened
+                _ensure_assistant_data(job)
+                stats["assistant_generated"] += 1
+
+                # Mark job as opened — human can now act via the UI panel
+                _update_job_status(job["id"], "opened")
+                stats["opened"] += 1
+                log.info(f"  ✅ Opened and ready: {job['company']}")
+
+                # Brief pause to let page settle
+                time.sleep(1.5)
+
             except Exception as e:
-                log.error(f"Error processing {job['company']}: {e}")
-                _update_job_status(job['id'], 'failed', str(e))
+                log.error(f"Error processing {job.get('company','?')}: {e}")
+                _update_job_status(job["id"], "failed", str(e))
+                stats["errors"] += 1
 
-    if page: _process(page)
+    if page:
+        _process(page)
     else:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
                 headless=headless,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-            ctx = browser.new_context()
+            ctx = browser.new_context(viewport={"width": 1280, "height": 800})
             p = ctx.new_page()
-            _process(p)
-            browser.close()
+            try:
+                _process(p)
+            finally:
+                browser.close()
 
+    log.info(
+        f"Apply Assistant done: opened={stats['opened']} "
+        f"assistant_generated={stats['assistant_generated']} "
+        f"safety_stops={stats['safety_stops']} errors={stats['errors']}"
+    )
     return stats
-
-from finder.core.intelligence.profile import get_profile_summary
-
-def generate_smart_answers(job: dict) -> dict:
-    """Generate intelligent, tailored answers for common application questions."""
-    profile = get_profile_summary()
-    skills = profile["skills"]
-    jd = (job.get("description", "") + " " + job.get("skills", "")).lower()
-    
-    # Extract specific matches for the cover letter
-    matching_skills = [s for s in skills if s in jd]
-    
-    # Template-based intelligent generation (avoids hallucination)
-    hire_me = f"I am a highly motivated developer with expertise in {', '.join(skills[:3])}. "
-    if matching_skills:
-        hire_me += f"I have direct experience with {', '.join(matching_skills[:2])} which aligns perfectly with your requirements."
-    else:
-        hire_me += "I am eager to apply my technical skills to contribute to your team's goals."
-        
-    availability = "I am available to start immediately and can commit to a full-time role."
-    
-    return {
-        "why_hire_me": hire_me,
-        "availability": availability,
-        "experience": f"I have been working with technologies like {', '.join(skills[:4])} and I'm always learning new stacks.",
-        "skills_matched": matching_skills
-    }

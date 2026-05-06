@@ -346,6 +346,14 @@ def init_db():
             skips      INTEGER DEFAULT 0,
             last_used  DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS resume_data (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename    TEXT,
+            raw_text    TEXT,
+            skills      TEXT,
+            uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     """
 
     if _USE_POSTGRES:
@@ -383,6 +391,13 @@ def init_db():
             conn.execute("""
                 DELETE FROM apply_queue
                 WHERE id NOT IN (SELECT MIN(id) FROM apply_queue GROUP BY job_url)
+            """)
+            # Reset any stuck 'pending' jobs that already have a score (leftover from old bug)
+            conn.execute("""
+                UPDATE apply_queue
+                SET status = 'ready_to_apply', updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'pending'
+                  AND match_score_at_apply IS NOT NULL
             """)
 
     _insert_default_controls()

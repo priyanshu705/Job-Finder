@@ -26,7 +26,7 @@ const DEMO_DAILY = [
   { date: '04-27', applied: 4, failed: 1 },
 ]
 
-export default function DashboardPage({ status, summary, loading, onCycle, running, agentStatus }) {
+export default function DashboardPage({ status, summary, loading, onCycle, onResume, running, agentStatus }) {
   const [daily, setDaily]     = useState([])
   const [seeding, setSeeding] = useState(false)
   const agent = agentStatus || { running: false, phase: 'idle', progress: '', logs: [] }
@@ -66,7 +66,7 @@ export default function DashboardPage({ status, summary, loading, onCycle, runni
     { name: 'uncertain', value: uncertain },
   ]
 
-  const isPaused = status?.paused === true || status?.paused === 'true'
+  const isPaused = status?.controls?.paused === 'true' || status?.controls?.paused === true
 
   // Demo Mode: seed data then refresh
   const handleDemoMode = useCallback(async () => {
@@ -148,10 +148,18 @@ export default function DashboardPage({ status, summary, loading, onCycle, runni
                 "{status.manual_verification_required}"
               </span>
             </p>
-            <p className="text-sm mt-2" style={{ color: 'rgba(148,163,184,0.7)' }}>
-              Log in manually to solve it, then click{' '}
-              <span style={{ color: '#34d399', fontWeight: 600 }}>Resume</span> to continue.
-            </p>
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-sm" style={{ color: 'rgba(148,163,184,0.7)' }}>
+                Log in manually to solve it, then click <span style={{ color: '#34d399', fontWeight: 600 }}>Resume</span> to continue.
+              </p>
+              <button 
+                onClick={onResume}
+                className="btn-success"
+                style={{ padding: '6px 16px', fontSize: 12 }}
+              >
+                <Play size={12} fill="currentColor" /> Resume
+              </button>
+            </div>
           </div>
         </div>
       )}

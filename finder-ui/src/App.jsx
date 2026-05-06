@@ -108,7 +108,7 @@ export default function App() {
     } catch (e) { toast.error(e.message) }
   }
 
-  const isPaused = status?.paused === true || status?.paused === 'true'
+  const isPaused = status?.controls?.paused === 'true' || status?.controls?.paused === true
   const sharedProps = { status, summary, loading, fetchStatus, agentStatus }
 
   return (
@@ -164,8 +164,13 @@ export default function App() {
             key={pageKey}
             style={{ animation: 'fadeIn 0.35s ease-out both' }}
           >
-            <AgentConsole agent={agentStatus} />
-            {page === 'dashboard'  && <DashboardPage  {...sharedProps} onCycle={handleCycle} running={running} />}
+            <AgentConsole 
+              agent={agentStatus} 
+              isPaused={isPaused} 
+              onResume={handleResume} 
+              manualVerificationRequired={status?.manual_verification_required}
+            />
+            {page === 'dashboard'  && <DashboardPage  {...sharedProps} onCycle={handleCycle} onResume={handleResume} running={running} />}
             {page === 'queue'      && <QueuePage      {...sharedProps} />}
             {page === 'goals'      && <GoalsPage      {...sharedProps} />}
             {page === 'activity'   && <ActivityPage   {...sharedProps} />}

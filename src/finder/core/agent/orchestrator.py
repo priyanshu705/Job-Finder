@@ -20,6 +20,7 @@ from finder.core.scraper import run_scraper
 from finder.core.matcher import run_matcher
 from finder.core.queue import run_queue
 from finder.core.apply_bot import run_apply_assistant
+from finder.core.sheets import run_sheets_sync
 
 # Intelligence Imports
 from finder.core.intelligence.profile import get_profile_summary
@@ -63,6 +64,10 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
     _report("init", "Initializing cycle...", "🚀 Starting Agent Cycle")
     
     controls = _get_controls()
+    try:
+        pages_per_query = int(scraper_pages or controls.get("scraper_pages") or os.getenv("SCRAPER_MAX_PAGES", "2"))
+    except (TypeError, ValueError):
+        pages_per_query = 2
     
     # 0. Check for Pause
     if controls.get("paused") == "true":
@@ -77,6 +82,7 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
         "matcher": {},
         "queue": {},
         "apply_bot": {},
+        "sheets": {},
         "error": None
     }
 
@@ -112,14 +118,19 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
 
             # 3. Scraper Phase (Adaptive Multi-Query)
             log.info("━━ Phase 1: Scraper ━━━━━━━━━━━━━━━━━━━━━━━━")
-            _report("scraper", "Scraping jobs...", "━━ Phase 1: Scraper")
+            _report("scraper", f"Scraping jobs up to {pages_per_query} pages per query...", "━━ Phase 1: Scraper")
             results["scraper"]["total_found"] = 0
             
             for q_obj in queries:
                 q_text = q_obj["query"]
                 _report("scraper", f"Searching '{q_text}'...", f"Starting scraper | query='{q_text}'")
                 try:
-                    s_res = run_scraper(query=q_text, max_pages=2, page=page)
+                    s_res = run_scraper(
+                        query=q_text,
+                        max_pages=pages_per_query,
+                        page=page,
+                        progress_callback=lambda progress, q=q_text: _report("scraper", progress),
+                    )
                     found = s_res.get("found", s_res.get("new_jobs", 0))
                     results["scraper"]["total_found"] += found
                     
@@ -172,6 +183,29 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
                 log.error(f"❌ Apply Assistant failed: {e}")
                 results["apply_bot"] = {"error": str(e)}
                 _report("apply", "Apply assistant failed", f"❌ Apply Assistant failed: {e}")
+
+            # 6. Google Sheets Sync
+            log.info("━━ Phase 5: Google Sheets Sync ━━━━━━━━━━━━━")
+            _report("sheets", "Syncing Google Sheets...", "━━ Phase 5: Google Sheets Sync")
+            try:
+                sheets_res = run_sheets_sync()
+                results["sheets"] = sheets_res
+                if sheets_res.get("skipped"):
+                    msg = "Google Sheets sync skipped: missing GOOGLE_SHEET_ID or credentials"
+                    log.warning(msg)
+                    _report("sheets", "Sheets sync skipped", msg)
+                elif sheets_res.get("error"):
+                    msg = f"Google Sheets sync failed: {sheets_res['error']}"
+                    log.error(msg)
+                    _report("sheets", "Sheets sync failed", msg)
+                else:
+                    msg = f"✅ Synced {sheets_res.get('rows_written', 0)} rows to Google Sheets"
+                    log.info(msg)
+                    _report("sheets", "Sheets sync complete", msg)
+            except Exception as e:
+                log.error(f"❌ Sheets sync failed: {e}")
+                results["sheets"] = {"error": str(e)}
+                _report("sheets", "Sheets sync failed", f"❌ Sheets sync failed: {e}")
 
         except Exception as e:
             log.critical(f"💥 Critical Failure in Agent Cycle: {e}")

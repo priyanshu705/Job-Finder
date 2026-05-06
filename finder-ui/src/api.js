@@ -100,4 +100,16 @@ export const api = {
   seedDemo: () => http.post('/demo/seed', null, t(TIMEOUT_MUTATION)),
 
   recordOutcome: (d) => http.post('/outcomes', d, t(TIMEOUT_MUTATION)),
+
+  // Resume management
+  getResume: () => http.get('/resume'),
+  uploadResume: (formData) => http.post('/resume', formData, {
+    ...t(30_000),
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
+
+  // Assistant data & queue repair
+  generateAssistant: () => http.post('/actions/generate-assistant', null, t(TIMEOUT_MUTATION)),
+  resetPending:      () => http.post('/actions/reset-pending',      null, t(TIMEOUT_MUTATION)),
 }
+

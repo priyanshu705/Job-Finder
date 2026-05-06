@@ -16,7 +16,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 from finder.shared.database import get_db, _USE_POSTGRES
-from finder.shared.config import LOGS_DIR
+from finder.shared.config import LOGS_DIR, RESUME_PATH
 from finder.core.agent import run_agent_cycle
 
 load_dotenv()
@@ -48,6 +48,7 @@ def _cors_origins():
             "http://127.0.0.1:5173",
             "http://localhost:3000",
             "https://autoapply-ai.vercel.app",
+            "https://job-finder-sooty-eight.vercel.app/",
             "https://job-finder-gy068644-8794s-projects.vercel.app/",
         ])
     )
@@ -542,6 +543,8 @@ def _run_async(name, fn):
         _running[name] = True
         try:
             fn()
+        except Exception as exc:
+            log.exception("Background task '%s' failed: %s", name, exc)
         finally:
             _running[name] = False
     t = threading.Thread(target=_task, daemon=True)
@@ -578,6 +581,11 @@ def update_job_status(job_id):
             "UPDATE apply_queue SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (new_status, job_id)
         )
+    try:
+        from finder.core.sheets import run_sheets_sync
+        _run_async("sheets", run_sheets_sync)
+    except Exception as exc:
+        log.warning("Could not start Google Sheets sync after status update: %s", exc)
     return jsonify({"id": job_id, "status": new_status})
 
 @app.route("/api/actions/scrape", methods=["POST"])
@@ -605,15 +613,181 @@ def trigger_cycle():
     from finder.core.agent import run_agent_cycle
     data   = request.json or {}
     kwargs = {
-        "duration_minutes":    int(data.get("duration_minutes", 5)),
-        "max_apply_per_cycle": int(data.get("max_apply", 5)),
-        "headless":            data.get("headless", True),
+        "query":         data.get("query", ""),
+        "scraper_pages": int(data.get("scraper_pages", 0) or 0),
+        "headless":      data.get("headless", True),
     }
     return jsonify(_run_async("agent", lambda: run_agent_cycle(**kwargs)))
 
 @app.route("/api/actions/status")
 def action_status():
     return jsonify({k: v for k, v in _running.items()})
+
+
+# ── Resume Upload & Management ────────────────────────────────────────────────
+
+@app.route("/api/resume", methods=["GET"])
+def get_resume():
+    """Return the current resume skills and metadata."""
+    try:
+        # Check DB for most recently uploaded resume
+        row = q1("SELECT filename, skills, uploaded_at FROM resume_data ORDER BY uploaded_at DESC LIMIT 1")
+        if row:
+            skills = json.loads(row.get("skills") or "[]") if row.get("skills") else []
+            return jsonify({
+                "filename":    row.get("filename", ""),
+                "skills":      skills,
+                "uploaded_at": row.get("uploaded_at", ""),
+                "source":      "db",
+            })
+        # Fallback: check filesystem
+        resume_path = os.getenv("RESUME_PATH", RESUME_PATH)
+        if os.path.exists(resume_path):
+            from finder.core.matcher.service import parse_resume, extract_skills
+            text   = parse_resume(resume_path)
+            skills = extract_skills(text) if text else []
+            return jsonify({
+                "filename":    os.path.basename(resume_path),
+                "skills":      skills,
+                "uploaded_at": "",
+                "source":      "filesystem",
+            })
+        # Fallback: env skills
+        env_skills = [s.strip() for s in os.getenv("USER_SKILLS", "").split(",") if s.strip()]
+        return jsonify({"filename": "", "skills": env_skills, "source": "env"})
+    except Exception as e:
+        log.error("/api/resume GET error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/resume", methods=["POST"])
+def upload_resume():
+    """Upload a resume PDF/DOCX, extract skills, store to DB and filesystem."""
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded. Use multipart/form-data with key 'file'."}), 400
+
+        f = request.files["file"]
+        filename = f.filename or "resume"
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in (".pdf", ".docx", ".doc", ".txt"):
+            return jsonify({"error": "Unsupported file type. Use PDF, DOCX, DOC, or TXT."}), 400
+
+        # Save to resumes directory
+        resumes_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        ))), "resumes")
+        os.makedirs(resumes_dir, exist_ok=True)
+        save_path = os.path.join(resumes_dir, f"resume{ext}")
+        f.save(save_path)
+        log.info("Resume saved to: %s", save_path)
+
+        # Parse and extract skills
+        from finder.core.matcher.service import parse_resume, extract_skills
+        raw_text = parse_resume(save_path)
+        skills   = extract_skills(raw_text) if raw_text else []
+        log.info("Extracted %d skills from resume: %s", len(skills), skills)
+
+        # Persist to DB
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO resume_data (filename, raw_text, skills, uploaded_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                (filename, raw_text[:10000], json.dumps(skills))
+            )
+
+        # Update query_weights based on new resume skills
+        from finder.core.intelligence.adaptive_search import initialize_queries
+        initialize_queries()
+
+        # Reset unscored pending jobs so they get re-matched with new resume
+        with get_db() as conn:
+            reset_count = conn.execute(
+                "UPDATE apply_queue SET match_score_at_apply = NULL, status = 'pending', "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE status IN ('pending', 'ready_to_apply') AND match_score_at_apply IS NOT NULL"
+            ).rowcount if hasattr(
+                conn.execute("SELECT 1"), 'rowcount'
+            ) else 0
+
+        return jsonify({
+            "success":     True,
+            "filename":    filename,
+            "skills":      skills,
+            "skill_count": len(skills),
+            "message":     f"Resume uploaded. Extracted {len(skills)} skills. Queue will be re-matched on next cycle.",
+        })
+    except Exception as e:
+        log.error("/api/resume POST error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/actions/generate-assistant", methods=["POST"])
+def trigger_generate_assistant():
+    """
+    Pre-generate assistant_data for all ready_to_apply jobs that are missing it.
+    Safe to call independently — useful to populate the panel without running a full cycle.
+    """
+    def _run():
+        from finder.core.apply_bot.answer_generator import generate_smart_answers
+        generated = 0
+        errors    = 0
+        with get_db() as conn:
+            jobs = [dict(r) for r in conn.execute(
+                """
+                SELECT q.id, q.job_url, q.assistant_data,
+                       j.title, j.company, j.skills, j.description
+                FROM apply_queue q
+                LEFT JOIN jobs j ON j.job_url = q.job_url
+                WHERE q.status IN ('pending', 'ready_to_apply', 'opened')
+                  AND (q.assistant_data IS NULL OR q.assistant_data = '')
+                ORDER BY q.match_score_at_apply DESC NULLS LAST
+                LIMIT 50
+                """
+            ).fetchall()]
+        with get_db() as conn:
+            for job in jobs:
+                try:
+                    ai_data = generate_smart_answers(job)
+                    conn.execute(
+                        "UPDATE apply_queue SET assistant_data=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (json.dumps(ai_data), job["id"])
+                    )
+                    generated += 1
+                except Exception as ex:
+                    log.error("assistant_data gen failed job id=%s: %s", job["id"], ex)
+                    errors += 1
+        log.info("generate-assistant: generated=%d errors=%d", generated, errors)
+
+    return jsonify(_run_async("generate_assistant", _run))
+
+
+@app.route("/api/actions/reset-pending", methods=["POST"])
+def reset_pending_stuck():
+    """
+    Repair jobs stuck in 'pending' with a score — promote to ready_to_apply.
+    Also clears jobs stuck in 'opened' for over 24 hours back to ready_to_apply.
+    """
+    try:
+        with get_db() as conn:
+            # Promote scored-but-stuck pending jobs
+            conn.execute("""
+                UPDATE apply_queue
+                SET status = 'ready_to_apply', updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'pending'
+                  AND match_score_at_apply IS NOT NULL
+            """)
+            # Reset opened jobs that have been sitting >24h (human never acted)
+            conn.execute("""
+                UPDATE apply_queue
+                SET status = 'ready_to_apply', updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'opened'
+                  AND updated_at < datetime('now', '-24 hours')
+            """)
+        return jsonify({"success": True, "msg": "Stuck jobs promoted to ready_to_apply"})
+    except Exception as e:
+        log.error("/api/actions/reset-pending error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/outcomes", methods=["POST"])
 def record_outcome():
@@ -624,6 +798,11 @@ def record_outcome():
         return jsonify({"error": "job_url and outcome required"}), 400
     from finder.core.intelligence import record_outcome as _rec
     _rec(url, out, data.get("days_to_respond"), data.get("notes", ""))
+    try:
+        from finder.core.sheets import run_sheets_sync
+        _run_async("sheets", run_sheets_sync)
+    except Exception as exc:
+        log.warning("Could not start Google Sheets sync after outcome update: %s", exc)
     return jsonify({"recorded": True}), 201
 
 @app.route("/api/activity")

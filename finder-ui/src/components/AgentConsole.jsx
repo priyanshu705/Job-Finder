@@ -2,13 +2,14 @@
 // Live agent console — shows when running AND a success/error banner when done
 import { CheckCircle2, XCircle, RotateCcw } from 'lucide-react'
 
-const PHASES = ['scraper', 'matcher', 'queue', 'apply']
+const PHASES = ['scraper', 'matcher', 'queue', 'apply', 'sheets']
 
 const PHASE_LABELS = {
   scraper: 'Scraping',
   matcher: 'Matching',
   queue:   'Ranking',
   apply:   'Applying',
+  sheets:  'Sheets',
   init:    'Starting',
   done:    'Complete',
   error:   'Error',
@@ -99,7 +100,7 @@ function ResultBanner({ agent }) {
 }
 
 // ── Live running console ───────────────────────────────────────────────────────
-export default function AgentConsole({ agent }) {
+export default function AgentConsole({ agent, isPaused, onResume, manualVerificationRequired }) {
   // Show result banner when not running but just finished
   if (!agent) return null
   if (!agent.running) return <ResultBanner agent={agent} />
@@ -135,9 +136,28 @@ export default function AgentConsole({ agent }) {
             </span>
           </div>
         </div>
-        <span style={{ fontSize: 10, color: 'rgba(100,116,139,0.8)', fontFamily: 'monospace', background: 'rgba(99,102,241,0.08)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(99,102,241,0.15)' }}>
-          {PHASE_LABELS[agent.phase] || agent.phase || 'initializing'}
-        </span>
+        <div className="flex items-center gap-3">
+          {(isPaused || manualVerificationRequired) && (
+            <button
+              onClick={onResume}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all duration-200"
+              style={{
+                background: 'linear-gradient(135deg, #34d399, #10b981)',
+                color: 'white',
+                boxShadow: '0 0 15px rgba(52,211,153,0.3)',
+                border: '1px solid rgba(52,211,153,0.4)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 0 20px rgba(52,211,153,0.5)' }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 0 15px rgba(52,211,153,0.3)' }}
+            >
+              <Play size={11} fill="currentColor" />
+              Resume Agent
+            </button>
+          )}
+          <span style={{ fontSize: 10, color: 'rgba(100,116,139,0.8)', fontFamily: 'monospace', background: 'rgba(99,102,241,0.08)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(99,102,241,0.15)' }}>
+            {PHASE_LABELS[agent.phase] || agent.phase || 'initializing'}
+          </span>
+        </div>
       </div>
 
       <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -147,9 +167,24 @@ export default function AgentConsole({ agent }) {
             <p style={{ fontSize: 10, color: 'rgba(100,116,139,0.7)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: 6 }}>
               Current Task
             </p>
-            <p style={{ fontSize: 18, fontWeight: 800, color: '#e2e8f0', lineHeight: 1.3, letterSpacing: '-0.01em' }}>
-              {agent.progress || 'Starting…'}
-            </p>
+            <div className="flex items-center justify-between">
+              <p style={{ fontSize: 18, fontWeight: 800, color: '#e2e8f0', lineHeight: 1.3, letterSpacing: '-0.01em' }}>
+                {manualVerificationRequired ? 'Waiting for Manual Verification' : (agent.progress || 'Starting…')}
+              </p>
+              {manualVerificationRequired && (
+                <div 
+                  className="px-2 py-1 rounded text-[10px] font-bold"
+                  style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}
+                >
+                  ACTION NEEDED
+                </div>
+              )}
+            </div>
+            {manualVerificationRequired && (
+              <p className="mt-1 text-slate-400" style={{ fontSize: 12 }}>
+                Challenge: <span style={{ color: '#fbbf24', fontFamily: 'monospace' }}>{manualVerificationRequired}</span>
+              </p>
+            )}
           </div>
 
           <div className="flex gap-3 items-center">

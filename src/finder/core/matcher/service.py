@@ -68,7 +68,7 @@ def parse_resume(path: str = "") -> str:
 
 # ── Skill extraction (pure regex — no spaCy) ─────────────────────────────────
 
-def extract_skills(text: str) -> list[str]:
+def extract_skills(text: str) -> list:
     """Extract known tech skills from text using regex patterns only."""
     if not text:
         return []
@@ -77,7 +77,7 @@ def extract_skills(text: str) -> list[str]:
 
 # ── Pure-Python TF-IDF cosine similarity ─────────────────────────────────────
 
-def _tokenize(text: str) -> list[str]:
+def _tokenize(text: str) -> list:
     """Lowercase alphanum tokens, remove stop-words."""
     _STOP = {
         "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
@@ -112,7 +112,7 @@ def _tfidf_cosine(doc_a: str, doc_b: str) -> float:
         for term in vocab
     }
 
-    def _tfidf_vec(tokens: list[str]) -> dict[str, float]:
+    def _tfidf_vec(tokens: list) -> dict:
         tf = Counter(tokens)
         total = len(tokens) or 1
         return {
@@ -156,8 +156,11 @@ def score_job(resume_text: str, job: dict) -> float:
     r_skills = set(extract_skills(resume_text))
     j_skills = set(extract_skills(job_text))
 
+    # Merge user_skills from profile with parsed resume skills
+    combined_skills = user_skills | r_skills
+
     # 1. Skill overlap score (60% weight)
-    overlap   = len(user_skills & j_skills)
+    overlap   = len(combined_skills & j_skills)
     kw_score  = (overlap / len(j_skills) * 100) if j_skills else 0.0
 
     # 2. Semantic similarity via pure-Python TF-IDF (40% weight)
@@ -180,7 +183,7 @@ def score_job(resume_text: str, job: dict) -> float:
     ):
         boost += 5                                           # fresher-friendly
 
-    critical_matches = len(user_skills & j_skills)
+    critical_matches = len(combined_skills & j_skills)
     boost += min(critical_matches * 2, 10)                   # exact tech match
 
     return round(min(base_score + boost, 100.0), 2)
@@ -191,42 +194,62 @@ def score_job(resume_text: str, job: dict) -> float:
 def run_matcher(resume_path: str = "", min_match: float = 0.0) -> dict:
     threshold   = min_match or MIN_MATCH
     resume_text = parse_resume(resume_path)
+
+    # FIX: Fall back to profile skills when no resume file is found
     if not resume_text:
-        return {"errors": 1}
+        profile = get_profile_summary()
+        resume_text = " ".join(profile["skills"])
+        log.warning("Resume file not found — falling back to USER_SKILLS profile for matching.")
+        if not resume_text.strip():
+            log.error("No resume file and no USER_SKILLS configured. Matcher cannot run.")
+            return {"scored": 0, "passed": 0, "skipped": 0, "errors": 1,
+                    "msg": "No resume or skills configured. Set RESUME_PATH or USER_SKILLS in .env"}
 
-    jobs = [
-        dict(r) for r in get_db().execute(
-            """SELECT q.id, q.job_url, j.title, j.description, j.skills
-               FROM apply_queue q
-               LEFT JOIN jobs j ON j.job_url = q.job_url
-               WHERE q.status = 'pending' AND q.match_score_at_apply IS NULL"""
-        ).fetchall()
-    ]
+    # FIX: Proper context manager for SELECT query (was calling .execute() directly on context manager object)
+    with get_db() as conn:
+        jobs = [
+            dict(r) for r in conn.execute(
+                """SELECT q.id, q.job_url, j.title, j.description, j.skills, j.company
+                   FROM apply_queue q
+                   LEFT JOIN jobs j ON j.job_url = q.job_url
+                   WHERE q.status = 'pending' AND q.match_score_at_apply IS NULL"""
+            ).fetchall()
+        ]
 
-    stats  = {"scored": 0, "passed": 0, "skipped": 0, "avg_score": 0.0, "top_jobs": []}
+    log.info(f"Matcher: found {len(jobs)} unscored pending jobs.")
+
+    stats  = {"scored": 0, "passed": 0, "skipped": 0, "avg_score": 0.0, "top_jobs": [], "errors": 0}
     scores = []
 
     with get_db() as conn:
         for job in jobs:
-            score = score_job(resume_text, job)
-            conn.execute(
-                "UPDATE apply_queue SET match_score_at_apply = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (score, "pending" if score >= threshold else "skip", job["id"]),
-            )
-            stats["scored"] += 1
-            scores.append(score)
-            if score >= threshold:
-                stats["passed"] += 1
-                stats["top_jobs"].append({
-                    "score":   score,
-                    "title":   job["title"],
-                    "company": job.get("company", ""),
-                })
-            else:
-                stats["skipped"] += 1
+            try:
+                score = score_job(resume_text, job)
+                # FIX: Jobs that pass threshold get 'ready_to_apply', not 'pending'
+                new_status = "ready_to_apply" if score >= threshold else "skip"
+                conn.execute(
+                    "UPDATE apply_queue SET match_score_at_apply = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (score, new_status, job["id"]),
+                )
+                stats["scored"] += 1
+                scores.append(score)
+                if score >= threshold:
+                    stats["passed"] += 1
+                    stats["top_jobs"].append({
+                        "score":   score,
+                        "title":   job.get("title", ""),
+                        "company": job.get("company", ""),
+                    })
+                else:
+                    stats["skipped"] += 1
+                log.debug(f"  {job.get('title','?')} @ {job.get('company','?')} → {score} [{new_status}]")
+            except Exception as e:
+                log.error(f"Scoring failed for job id={job.get('id')}: {e}")
+                stats["errors"] += 1
 
     if scores:
         stats["avg_score"] = round(sum(scores) / len(scores), 2)
 
+    log.info(f"Matcher done: scored={stats['scored']} passed={stats['passed']} skipped={stats['skipped']} avg={stats['avg_score']}")
     record_metric("match_complete", "matcher", value=stats["scored"])
     return stats

@@ -9,7 +9,7 @@ import json
 import time
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from dotenv import load_dotenv
 from playwright.sync_api import (
@@ -186,7 +186,14 @@ def _scrape_page(page: Page, page_num: int, slug: str) -> list[dict]:
         return [j for j in (_parse_job_card(c) for c in cards) if j]
     except Exception: return []
 
-def run_scraper(query: str = "", max_pages: int = 0, headless: bool = True, deadline: float = 0.0, page: Optional[Page] = None) -> dict:
+def run_scraper(
+    query: str = "",
+    max_pages: int = 0,
+    headless: bool = True,
+    deadline: float = 0.0,
+    page: Optional[Page] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> dict:
     search_query = query or QUERY
     pages = max_pages or MAX_PAGES
     slug = _slug(search_query)
@@ -199,7 +206,14 @@ def run_scraper(query: str = "", max_pages: int = 0, headless: bool = True, dead
     log.info(f"Starting scraper | query='{search_query}' | max_pages={pages}")
 
     # Helper to run the core scraper logic
-    def _run_with_page(p: Page, context):
+    def _progress(message: str) -> None:
+        if progress_callback:
+            try:
+                progress_callback(message)
+            except Exception:
+                pass
+
+    def _run_with_page(p: Page, context, reuse_page_for_details: bool = False):
         if not page and not login(p): # Only login if we created the page ourselves
             stats["errors"] += 1
             return
@@ -210,21 +224,25 @@ def run_scraper(query: str = "", max_pages: int = 0, headless: bool = True, dead
             if deadline > 0 and time.time() > deadline:
                 stats["timed_out"] = True
                 break
+            _progress(f"Scraping page {pg}/{pages} for '{search_query}'...")
             page_jobs = _scrape_page(p, pg, slug)
             if not page_jobs: break
             all_jobs.extend(page_jobs)
             time.sleep(1.0)
 
         stats["scraped"] = len(all_jobs)
-        # Use a separate page for details if possible, otherwise use the same
-        detail_page = context.new_page() if context else p
-        for job in all_jobs:
+        # In visible shared-session runs, keep using the same tab so the browser
+        # does not appear to get stuck after opening a second details tab.
+        detail_page = p if reuse_page_for_details or not context else context.new_page()
+        total_jobs = len(all_jobs)
+        for idx, job in enumerate(all_jobs, start=1):
             if deadline > 0 and time.time() > deadline:
                 stats["timed_out"] = True
                 break
             if job["job_url"] in existing_urls:
                 stats["skipped"] += 1
                 continue
+            _progress(f"Fetching job details {idx}/{total_jobs} for '{search_query}'...")
             job = _fetch_job_detail(detail_page, job)
             if _insert_job(job):
                 stats["new_jobs"] += 1
@@ -237,13 +255,13 @@ def run_scraper(query: str = "", max_pages: int = 0, headless: bool = True, dead
 
     if page:
         log.info("Reusing existing session for scraper.")
-        _run_with_page(page, page.context)
+        _run_with_page(page, page.context, reuse_page_for_details=True)
     else:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=headless, slow_mo=SLOW_MO, args=["--no-sandbox", "--disable-dev-shm-usage"])
             context = browser.new_context(user_agent="Mozilla/5.0 ...", viewport={"width": 1280, "height": 800})
             p = context.new_page()
-            _run_with_page(p, context)
+            _run_with_page(p, context, reuse_page_for_details=False)
             browser.close()
 
     stats["finished_at"] = datetime.now(timezone.utc).isoformat()

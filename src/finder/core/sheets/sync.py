@@ -215,9 +215,16 @@ def append_application_row(job: dict, status: str, sheet=None) -> bool:
 
 def run_sheets_sync(tabs: Optional[list] = None) -> dict:
     """Sync all tabs to Google Sheets."""
-    stats = {"synced_tabs": 0, "rows_written": 0, "skipped": False, "error": None}
-    if not SHEET_ID or not os.path.exists(CREDENTIALS_PATH):
+    stats = {"synced_tabs": 0, "rows_written": 0, "skipped": False, "error": None, "tab_errors": []}
+    if not SHEET_ID:
         stats["skipped"] = True
+        stats["error"] = "GOOGLE_SHEET_ID not set"
+        log.warning(stats["error"])
+        return stats
+    if not os.path.exists(CREDENTIALS_PATH):
+        stats["skipped"] = True
+        stats["error"] = f"Google credentials not found at {CREDENTIALS_PATH}"
+        log.warning(stats["error"])
         return stats
     try:
         client = _get_client()
@@ -233,8 +240,14 @@ def run_sheets_sync(tabs: Optional[list] = None) -> dict:
                 else: continue
                 stats["synced_tabs"] += 1
                 stats["rows_written"] += n
-            except Exception as e: log.error(f"Tab '{tab}' sync failed: {e}")
+            except Exception as e:
+                msg = f"Tab '{tab}' sync failed: {e}"
+                stats["tab_errors"].append(msg)
+                log.error(msg)
+        if stats["tab_errors"] and not stats["error"]:
+            stats["error"] = "; ".join(stats["tab_errors"])
         record_metric("sheets_sync", "sheets", value=stats["rows_written"])
     except Exception as exc:
         stats["error"] = str(exc)
+        log.error(f"Google Sheets sync failed: {exc}")
     return stats

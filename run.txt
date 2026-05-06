@@ -1,0 +1,12 @@
+Create and activate a Virtual Environment:
+python -m venv venv
+.\venv\Scripts\activate
+
+python run.py api
+
+ Frontend Setup (React/Vite)
+Open a new terminal window:
+
+Navigate to the UI folder:
+cd finder-ui
+npm run dev
