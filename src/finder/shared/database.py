@@ -25,6 +25,7 @@ _USE_POSTGRES = DATABASE_URL.startswith("postgresql://")
 
 if _USE_POSTGRES:
     import psycopg2
+    import psycopg2.extras
     from psycopg2.pool import ThreadedConnectionPool
 
     _pg_pool = None

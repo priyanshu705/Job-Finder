@@ -27,7 +27,7 @@ services:
           type: redis
           name: autoapply-redis
           property: connectionString
-      - key: JWT_SECRET_KEY
+      - key: JWT_SECRET
         generateValue: true
       - key: FLASK_DEBUG
         value: "0"
