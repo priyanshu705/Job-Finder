@@ -1,17 +1,13 @@
 services:
   - type: web
     name: autoapply-ai-backend
-    runtime: python
-    region: singapore   # closest to India — low latency
+    env: python
+    region: singapore
     plan: free
+    ipAllowList: [] # Public access via Render's load balancer is handled automatically; internal only for direct IP
 
-    # ── Build ────────────────────────────────────────────────────────────────
-    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --with-deps chromium && PLAYWRIGHT_BROWSERS_PATH=0 python scripts/ensure_playwright.py
-
-    # ── Start ────────────────────────────────────────────────────────────────
-    # 1 worker (free tier limit). timeout increased for long-running jobs.
-    # Verify Chromium exists before Gunicorn imports code that can launch Playwright.
-    startCommand: python scripts/ensure_playwright.py && gunicorn --worker-class eventlet --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
+    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
+    startCommand: gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 src.finder.api.main:app
 
     # ── Health check ─────────────────────────────────────────────────────────
     healthCheckPath: /api/health
@@ -59,14 +55,15 @@ services:
     name: autoapply-redis
     plan: free
     region: singapore
+    ipAllowList: [] # Internal only
 
   - type: worker
     name: autoapply-celery-worker
-    runtime: python
+    env: python
     region: singapore
     plan: free
-    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --with-deps chromium && PLAYWRIGHT_BROWSERS_PATH=0 python scripts/ensure_playwright.py
-    startCommand: python scripts/ensure_playwright.py && celery -A finder.shared.celery_app worker --loglevel=info
+    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
+    startCommand: celery -A finder.shared.celery_app worker --loglevel=info --concurrency=1
     envVars:
       - key: PYTHONPATH
         value: src
@@ -77,5 +74,5 @@ services:
           property: connectionString
       - key: DATABASE_URL
         sync: false
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: "0"
+      - key: CELERY_WORKER_PROCESS
+        value: "true"
