@@ -1,43 +1,52 @@
 """
 src/finder/core/intelligence/semantic_matcher.py
 ------------------------------------------------
-Phase C: Semantic Matching Engine
-Zero-budget, lightweight semantic similarity using sentence-transformers.
+Phase I: Zero-Budget Production Semantic Matcher
+Uses Google Gemini Embeddings API for ultra-lightweight RAM footprint.
 """
 
 import json
 import logging
+import hashlib
 from typing import Optional, List
+import google.generativeai as genai
 from finder.shared.database import get_db
 
 log = logging.getLogger("semantic_matcher")
 
-_model = None
-
-def get_model():
-    """Lazy load the sentence-transformer model to save memory."""
-    global _model
-    if _model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            log.info("Loading semantic model (all-MiniLM-L6-v2)...")
-            _model = SentenceTransformer('all-MiniLM-L6-v2')
-        except ImportError as exc:
-            log.error("Failed to load sentence-transformers: %s", exc)
-            return None
-    return _model
-
+def _get_embedding_from_api(text: str) -> Optional[List[float]]:
+    """Fetch embedding from Google Gemini API."""
+    try:
+        # Truncate text to Gemini's limit if necessary (approx 10k tokens)
+        truncated_text = text[:30000] 
+        result = genai.embed_content(
+            model="models/embedding-001",
+            content=truncated_text,
+            task_type="clustering"
+        )
+        return result['embedding']
+    except Exception as exc:
+        log.error("Gemini embedding API failed: %s", exc)
+        return None
 
 def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """Compute cosine similarity between two vectors (fallback if sklearn is missing)."""
-    import numpy as np
-    v1 = np.array(vec1)
-    v2 = np.array(vec2)
-    return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+    """Compute cosine similarity between two vectors using pure Python."""
+    import math
+    
+    if len(vec1) != len(vec2):
+        return 0.0
+        
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm_a = math.sqrt(sum(a * a for a in vec1))
+    norm_b = math.sqrt(sum(b * b for b in vec2))
+    
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+        
+    return dot_product / (norm_a * norm_b)
 
-
-def get_cached_embedding(source_type: str, source_id: str, version: str = "all-MiniLM-L6-v2") -> Optional[List[float]]:
-    """Retrieve an embedding from PostgreSQL."""
+def get_cached_embedding(source_type: str, source_id: str, version: str = "gemini-v1") -> Optional[List[float]]:
+    """Retrieve an embedding from the cache."""
     try:
         with get_db() as conn:
             row = conn.execute(
@@ -47,17 +56,14 @@ def get_cached_embedding(source_type: str, source_id: str, version: str = "all-M
             if row and row["embedding"]:
                 return json.loads(row["embedding"])
     except Exception as exc:
-        log.warning("Cache fetch error for %s (%s): %s", source_type, source_id, exc)
+        log.warning("Cache fetch error: %s", exc)
     return None
 
-
-def save_embedding(source_type: str, source_id: str, embedding: List[float], version: str = "all-MiniLM-L6-v2"):
-    """Save an embedding to PostgreSQL."""
+def save_embedding(source_type: str, source_id: str, embedding: List[float], version: str = "gemini-v1"):
+    """Save an embedding to the cache."""
     try:
         embedding_str = json.dumps(embedding)
         with get_db() as conn:
-            # We use an ON CONFLICT or REPLACE equivalent depending on PG/SQLite
-            # Our DB wrapper doesn't abstract UPSERT fully, so we'll delete and insert
             conn.execute(
                 "DELETE FROM embedding_cache WHERE source_type = ? AND source_id = ? AND version = ?",
                 (source_type, source_id, version)
@@ -66,69 +72,45 @@ def save_embedding(source_type: str, source_id: str, embedding: List[float], ver
                 "INSERT INTO embedding_cache (source_type, source_id, embedding, version) VALUES (?, ?, ?, ?)",
                 (source_type, source_id, embedding_str, version)
             )
-    except Exception as exc:
-        log.warning("Cache save error for %s (%s): %s", source_type, source_id, exc)
-
+    except Exception:
+        pass
 
 def compute_embedding(text: str, source_type: str, source_id: str, use_cache: bool = True) -> Optional[List[float]]:
-    """Compute (or retrieve) the embedding for a given text."""
-    if not text:
-        return None
+    """Compute or retrieve embedding via Gemini API."""
+    if not text: return None
 
-    import hashlib
+    # We use a hash of the text to ensure cache hits for identical content across different job URLs
     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-    hash_source_id = f"hash_{text_hash}"
+    hash_id = f"h_{text_hash}"
+    version = "gemini-v1"
 
     if use_cache:
-        # First check if we have the embedding for this specific source_id
-        cached = get_cached_embedding(source_type, source_id)
-        if cached:
-            return cached
-            
-        # Then check if we have the exact identical text hashed previously
-        cached_hash = get_cached_embedding(source_type, hash_source_id)
+        cached = get_cached_embedding(source_type, source_id, version)
+        if cached: return cached
+        
+        cached_hash = get_cached_embedding(source_type, hash_id, version)
         if cached_hash:
-            log.info(f"Exact-match cache hit for {source_type} {source_id}")
-            # Save it under the new source_id for future quick lookups
-            save_embedding(source_type, source_id, cached_hash)
+            save_embedding(source_type, source_id, cached_hash, version)
             return cached_hash
 
-    model = get_model()
-    if not model:
-        return None
-
-    # Generate embedding
-    try:
-        # Encode returns a numpy array, convert to list of floats
-        embedding = model.encode(text).tolist()
-        if use_cache:
-            save_embedding(source_type, source_id, embedding)
-            save_embedding(source_type, hash_source_id, embedding)
-        return embedding
-    except Exception as exc:
-        log.error("Embedding generation failed: %s", exc)
-        return None
-
+    # Fetch from API
+    log.info(f"Computing Gemini embedding for {source_type} {source_id}...")
+    emb = _get_embedding_from_api(text)
+    
+    if emb and use_cache:
+        save_embedding(source_type, source_id, emb, version)
+        save_embedding(source_type, hash_id, emb, version)
+        
+    return emb
 
 def calculate_semantic_similarity(resume_text: str, job_text: str, resume_id: str = "current_user", job_url: str = "") -> float:
-    """
-    Calculate the semantic cosine similarity between a resume and a job description.
-    Returns a score between 0.0 and 1.0.
-    """
+    """Calculate cosine similarity using Gemini embeddings."""
     resume_emb = compute_embedding(resume_text, "resume", resume_id)
     job_emb = compute_embedding(job_text, "job", job_url)
 
     if not resume_emb or not job_emb:
-        log.warning("Could not compute semantic similarity (missing embeddings).")
         return 0.0
 
-    try:
-        # Use sklearn for fast cosine similarity if available
-        from sklearn.metrics.pairwise import cosine_similarity
-        import numpy as np
-        score = cosine_similarity(np.array(resume_emb).reshape(1, -1), np.array(job_emb).reshape(1, -1))[0][0]
-        return max(0.0, float(score))
-    except ImportError:
-        # Fallback
-        score = _cosine_similarity(resume_emb, job_emb)
-        return max(0.0, float(score))
+    score = _cosine_similarity(resume_emb, job_emb)
+    return max(0.0, float(score))
+
