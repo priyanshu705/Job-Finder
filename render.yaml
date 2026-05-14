@@ -64,13 +64,18 @@ services:
     region: singapore
     ipAllowList: [] # Internal only
 
-  - type: worker
+  - type: web
     name: autoapply-celery-worker
     env: python
     region: singapore
     plan: free
+    ipAllowList: []
+    # We use 'web' type because 'worker' is not available on Render's free tier.
+    # It will run the Celery command instead of a web server.
     buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
-    startCommand: celery -A finder.shared.celery_app worker --loglevel=info --concurrency=1
+    startCommand: |
+      python -m http.server $PORT &
+      celery -A finder.shared.celery_app worker --loglevel=info --concurrency=1 --pool=solo
     envVars:
       - key: PYTHONPATH
         value: src
