@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ExternalLink, ChevronLeft, ChevronRight, Wand2, Check, X, Copy, Info, Target, CheckCircle } from 'lucide-react'
 import { api } from '../api.js'
+import SemanticMatchCard from './SemanticMatchCard.jsx'
 
 const PAGE_SIZE = 20
 
@@ -128,15 +129,14 @@ function JobAssistantPanel({ job, onClose, onUpdate, nextJob }) {
           </div>
         ) : (
           <>
-            {/* Match Reason */}
+            {/* Match Reason (Phase C Semantic Intelligence UI) */}
             {data.explanation && (
-              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                 <div className="flex items-center gap-2 mb-1.5">
-                    <Target size={14} className="text-blue-400" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400">Why You Match</span>
-                 </div>
-                 <p className="text-xs text-slate-300 leading-relaxed">{data.explanation}</p>
-              </div>
+              <SemanticMatchCard 
+                  jobId={job.id} 
+                  score={job.match_score_at_apply ?? job.match_score} 
+                  explanation={data.explanation} 
+                  aiReasoning={job.ai_reasoning}
+              />
             )}
 
             {/* Pitch */}

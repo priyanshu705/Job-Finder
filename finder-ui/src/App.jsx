@@ -10,13 +10,17 @@ import GoalsPage      from './pages/GoalsPage.jsx'
 import ActivityPage   from './pages/ActivityPage.jsx'
 import AnalyticsPage  from './pages/AnalyticsPage.jsx'
 import SettingsPage   from './pages/SettingsPage.jsx'
+import ResumePage     from './pages/ResumePage.jsx'
+import AICopilotPage  from './pages/AICopilotPage.jsx'
+import CareerInsightsPage from './pages/CareerInsightsPage.jsx'
+import FollowupPage   from './pages/FollowupPage.jsx'
+import SourceHealthPage from './pages/SourceHealthPage.jsx'
 import AgentConsole  from './components/AgentConsole.jsx'
 import OfflineBanner from './components/OfflineBanner.jsx'
-
-const POLL_MS = 4000
+import { socket, connectSocket, disconnectSocket } from './services/socket.js'
 
 export default function App() {
-  const [page, setPage]           = useState('dashboard')
+  const [page, setPage]           = useState('resume')
   const [status, setStatus]       = useState(null)
   const [summary, setSummary]     = useState(null)
   const [loading, setLoading]     = useState(true)
@@ -26,7 +30,6 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [pageKey, setPageKey]     = useState(0)
   const [isOffline, setIsOffline] = useState(false)
-  const timerRef = useRef(null)
   const isFetchingRef = useRef(false)
   const isMountedRef = useRef(true)
   const isCyclingRef = useRef(false)
@@ -57,11 +60,21 @@ export default function App() {
 
   useEffect(() => {
     isMountedRef.current = true
+    connectSocket()
     fetchStatus()
-    timerRef.current = setInterval(fetchStatus, POLL_MS)
+    
+    socket.on('connect', () => setIsOffline(false))
+    socket.on('disconnect', () => setIsOffline(true))
+    socket.on('agent:status', () => fetchStatus())
+    socket.on('queue:updated', () => fetchStatus())
+    
     return () => {
       isMountedRef.current = false
-      clearInterval(timerRef.current)
+      socket.off('connect')
+      socket.off('disconnect')
+      socket.off('agent:status')
+      socket.off('queue:updated')
+      disconnectSocket()
     }
   }, [fetchStatus])
 
@@ -170,11 +183,16 @@ export default function App() {
               onResume={handleResume} 
               manualVerificationRequired={status?.manual_verification_required}
             />
+            {page === 'resume'     && <ResumePage     {...sharedProps} />}
             {page === 'dashboard'  && <DashboardPage  {...sharedProps} onCycle={handleCycle} onResume={handleResume} running={running} />}
             {page === 'queue'      && <QueuePage      {...sharedProps} />}
             {page === 'goals'      && <GoalsPage      {...sharedProps} />}
+            {page === 'copilot'    && <AICopilotPage  {...sharedProps} />}
+            {page === 'insights'   && <CareerInsightsPage {...sharedProps} />}
+            {page === 'followups'  && <FollowupPage   {...sharedProps} />}
             {page === 'activity'   && <ActivityPage   {...sharedProps} />}
             {page === 'analytics'  && <AnalyticsPage  {...sharedProps} />}
+            {page === 'source-health' && <SourceHealthPage {...sharedProps} />}
             {page === 'settings'   && <SettingsPage   {...sharedProps} />}
           </div>
         </main>

@@ -111,5 +111,22 @@ export const api = {
   // Assistant data & queue repair
   generateAssistant: () => http.post('/actions/generate-assistant', null, t(TIMEOUT_MUTATION)),
   resetPending:      () => http.post('/actions/reset-pending',      null, t(TIMEOUT_MUTATION)),
+
+  // ── Phase B: AI Copilot ──────────────────────────────────────────────────
+  aiGenerate: (generation_type, context, job_id) =>
+    http.post('/ai/generate', { generation_type, context, job_id }, t(TIMEOUT_CYCLE)),
+  aiGenerateResult: (taskId) => http.get(`/ai/generate/${taskId}/result`, t(8_000)),
+  aiHistory: () => http.get('/ai/history'),
+
+  // ── Phase B: Analytics KPIs ──────────────────────────────────────────────
+  analyticsKpis:   () => http.get('/analytics/kpis'),
+  analyticsSkills: () => http.get('/analytics/skills'),
+
+  // ── Phase B: Follow-up Queue ─────────────────────────────────────────────
+  followups:          (status) => http.get('/followups', { params: status ? { status } : {} }),
+  generateFollowup:   (d) => http.post('/followups/generate', d, t(TIMEOUT_MUTATION)),
+  approveFollowup:    (id) => http.post(`/followups/${id}/approve`, null, t(TIMEOUT_MUTATION)),
+  dismissFollowup:    (id) => http.post(`/followups/${id}/dismiss`, null, t(TIMEOUT_MUTATION)),
+  deleteFollowup:     (id) => http.delete(`/followups/${id}`, t(TIMEOUT_MUTATION)),
 }
 

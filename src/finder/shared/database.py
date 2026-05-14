@@ -25,15 +25,30 @@ _USE_POSTGRES = DATABASE_URL.startswith("postgresql://")
 
 if _USE_POSTGRES:
     import psycopg2
-    import psycopg2.extras
+    from psycopg2.pool import ThreadedConnectionPool
+
+    _pg_pool = None
+
+    def _get_pg_pool():
+        global _pg_pool
+        if _pg_pool is None:
+            log.info("Initializing ThreadedConnectionPool for PostgreSQL (min=1, max=10)")
+            _pg_pool = ThreadedConnectionPool(
+                1, 10,
+                DATABASE_URL,
+                cursor_factory=psycopg2.extras.RealDictCursor,
+                connect_timeout=10,
+            )
+        return _pg_pool
 
     def _new_pg_conn():
-        """Open a fresh psycopg2 dict-cursor connection."""
-        return psycopg2.connect(
-            DATABASE_URL,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-            connect_timeout=10,
-        )
+        """Retrieve a connection from the pool."""
+        return _get_pg_pool().getconn()
+
+    def _release_pg_conn(conn):
+        """Release a connection back to the pool."""
+        if _pg_pool and conn:
+            _pg_pool.putconn(conn)
 
     def _pg_sql(sql: str) -> str:
         """Convert SQLite-style ? placeholders → %s for psycopg2."""
@@ -93,6 +108,11 @@ if _USE_POSTGRES:
                         log.warning("executescript stmt skipped: %s", e)
                         self._conn.rollback()
 
+        def executemany(self, sql, params_list):
+            sql = _pg_sql(sql)
+            cur = self._conn.cursor()
+            psycopg2.extras.execute_batch(cur, sql, params_list)
+
         def __enter__(self):
             return self
 
@@ -119,7 +139,7 @@ if _USE_POSTGRES:
                 except Exception:
                     pass
             try:
-                self._conn.close()
+                _release_pg_conn(self._conn)
             except Exception:
                 pass
 
@@ -155,6 +175,46 @@ else:
             self._conn.close()
 
 
+# ── Universal Database Helpers ─────────────────────────────────────────────────
+
+from contextlib import contextmanager
+
+@contextmanager
+def transaction():
+    """
+    Explicit transaction context manager.
+    Yields a connection-like object that automatically commits on success,
+    or rolls back on exception.
+    """
+    with get_db() as conn:
+        try:
+            yield conn
+        except Exception as e:
+            log.error("DB transaction failed, rolling back: %s", e)
+            raise
+
+def fetch_all_dict(conn, sql: str, params=()) -> list:
+    """Fetch all rows as dictionaries."""
+    cur = conn.execute(sql, params)
+    rows = cur.fetchall()
+    return [dict(r) for r in rows] if rows else []
+
+def fetch_one_dict(conn, sql: str, params=()) -> dict:
+    """Fetch a single row as a dictionary."""
+    cur = conn.execute(sql, params)
+    row = cur.fetchone()
+    return dict(row) if row else {}
+
+def execute_many(conn, sql: str, params_list: list):
+    """Execute a single query against a list of parameter tuples."""
+    conn.executemany(sql, params_list)
+
+def execute_transaction(queries: list):
+    """Execute multiple queries within a single transaction safely."""
+    with transaction() as conn:
+        for sql, params in queries:
+            conn.execute(sql, params)
+
 # ── Schema initialization ──────────────────────────────────────────────────────
 
 def _ddl(sql: str) -> str:
@@ -173,8 +233,19 @@ def init_db():
     log.info("Initializing database (postgres=%s)", _USE_POSTGRES)
 
     schema = """
+        CREATE TABLE IF NOT EXISTS users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            email        TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            full_name    TEXT,
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_login   DATETIME,
+            is_active    INTEGER DEFAULT 1
+        );
+
         CREATE TABLE IF NOT EXISTS jobs (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
             title        TEXT NOT NULL,
             company      TEXT NOT NULL,
             platform     TEXT NOT NULL,
@@ -186,16 +257,19 @@ def init_db():
             job_url      TEXT UNIQUE NOT NULL,
             form_type    TEXT DEFAULT 'unknown',
             scraped_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_active    INTEGER DEFAULT 1
+            is_active    INTEGER DEFAULT 1,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS apply_queue (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_url              TEXT UNIQUE,
+            user_id              INTEGER NOT NULL,
+            job_url              TEXT,
             job_json             TEXT,
             status               TEXT DEFAULT 'pending',
             match_score_at_apply REAL,
             risk_score           REAL,
+            match_explanation    TEXT,
             goal_boost           REAL DEFAULT 1.0,
             attempts             INTEGER DEFAULT 0,
             is_exploration       INTEGER DEFAULT 0,
@@ -203,16 +277,19 @@ def init_db():
             assistant_data       TEXT,
             relevance_feedback   TEXT,
             queued_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at           DATETIME
+            updated_at           DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS user_goals (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
             goal_type  TEXT,
             value      TEXT,
             priority   INTEGER DEFAULT 5,
             active     INTEGER DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         );
 
         CREATE TABLE IF NOT EXISTS goal_progress (
@@ -354,6 +431,94 @@ def init_db():
             skills      TEXT,
             uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS ai_generations (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            generation_type  TEXT NOT NULL,
+            prompt_hash      TEXT NOT NULL,
+            provider         TEXT DEFAULT 'gemini',
+            response         TEXT,
+            usage_count      INTEGER DEFAULT 1,
+            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS analytics_snapshots (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            metric_name   TEXT NOT NULL,
+            metric_value  REAL,
+            dimension     TEXT,
+            snapshot_date DATE DEFAULT CURRENT_DATE
+        );
+
+        CREATE TABLE IF NOT EXISTS followup_queue (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_url       TEXT NOT NULL,
+            type          TEXT NOT NULL,
+            draft_content TEXT,
+            status        TEXT DEFAULT 'draft',
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at    DATETIME
+        );
+
+        CREATE TABLE IF NOT EXISTS embedding_cache (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_type  TEXT NOT NULL,
+            source_id    TEXT NOT NULL,
+            embedding    TEXT NOT NULL,
+            version      TEXT DEFAULT 'all-MiniLM-L6-v2',
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_type, source_id, version)
+        );
+
+        CREATE TABLE IF NOT EXISTS task_failure_audit (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id      TEXT NOT NULL,
+            task_type    TEXT NOT NULL,
+            error_type   TEXT,
+            trace_id     TEXT,
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS resume_versions (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id        INTEGER DEFAULT 1,
+            skills         TEXT,
+            detected_roles TEXT,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS notifications (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id        INTEGER DEFAULT 1,
+            message        TEXT NOT NULL,
+            type           TEXT NOT NULL,
+            read_status    INTEGER DEFAULT 0,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS reasoning_cache (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_url        TEXT NOT NULL UNIQUE,
+            reasoning      TEXT NOT NULL,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS user_behavior_memory (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id        INTEGER DEFAULT 1,
+            event_type     TEXT NOT NULL,
+            context        TEXT NOT NULL,
+            weight         REAL DEFAULT 1.0,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy_insights (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id        INTEGER DEFAULT 1,
+            insight_type   TEXT NOT NULL,
+            insight_text   TEXT NOT NULL,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     """
 
     if _USE_POSTGRES:
@@ -369,7 +534,7 @@ def init_db():
                 except Exception as e:
                     log.warning("DDL skipped: %s", e)
         _pg_indexes(cur)
-        conn.close()
+        _release_pg_conn(conn)
     else:
         import sqlite3
         with get_db() as conn:
@@ -378,6 +543,7 @@ def init_db():
             for col_sql in [
                 "ALTER TABLE apply_queue ADD COLUMN assistant_data TEXT",
                 "ALTER TABLE apply_queue ADD COLUMN relevance_feedback TEXT",
+                "ALTER TABLE apply_queue ADD COLUMN match_explanation TEXT",
             ]:
                 try:
                     conn.execute(col_sql)

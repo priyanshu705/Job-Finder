@@ -38,12 +38,42 @@ else:
     else:
         DB_PATH = os.path.join(DATA_DIR, "finder.db")
 
-# Resume
+# ── Phase 1B: Resume API Configuration ───────────────────────────────────────
+
+# File limits and types
+MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", 5 * 1024 * 1024)) # 5MB limit
+ALLOWED_RESUME_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
+ALLOWED_RESUME_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+    "text/plain",
+}
+
+# Parsing limits
+PARSER_TIMEOUT_SECONDS = int(os.getenv("PARSER_TIMEOUT_SECONDS", 10))
+ENABLE_RESUME_UPLOADS = os.getenv("ENABLE_RESUME_UPLOADS", "true").lower() == "true"
+
+# Fallback basic resume path
 RESUME_PATH = os.getenv("RESUME_PATH", os.path.join(RESUME_DIR, "resume.pdf"))
 
-# Ensure directories exist (file-system directories only — skip in PG-only mode)
+# Future-proofing placeholders
+FUTURE_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+FUTURE_JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-change-in-prod")
+
+def get_resume_upload_dir() -> str:
+    """
+    Returns the configured resume upload directory, ensuring it exists.
+    Safe for runtime usage without import-side-effects.
+    """
+    directory = os.getenv("RESUME_DIR", RESUME_DIR)
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+# Ensure base directories exist (file-system directories only — skip in PG-only mode)
 os.makedirs(DATA_DIR,       exist_ok=True)
 os.makedirs(LOGS_DIR,       exist_ok=True)
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+# Avoid creating RESUME_DIR here at import time if we want to defer it.
+# We keep it for backwards compatibility with the rest of the app for now.
 os.makedirs(RESUME_DIR,     exist_ok=True)
-

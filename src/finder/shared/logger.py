@@ -67,6 +67,27 @@ def get_logger(name: str) -> logging.Logger:
 
     return logger
 
+
+def timed(func):
+    """Log execution time for decorated functions."""
+    import functools
+    import time
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            elapsed = time.time() - start
+            get_logger(func.__module__).info(
+                "%s executed in %.3fs",
+                func.__name__,
+                elapsed,
+            )
+    return wrapper
+
+
 def screenshot_name(module: str, reason: str, context: str = "") -> str:
     ts  = int(datetime.now().timestamp())
     ctx = context[:20].replace("/", "_").replace("?", "").replace(" ", "_") if context else ""

@@ -15,15 +15,31 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from finder.shared.database import get_db, _USE_POSTGRES
+from finder.shared.database import get_db, _USE_POSTGRES, init_db
 from finder.shared.config import LOGS_DIR, RESUME_PATH
 from finder.core.agent import run_agent_cycle
+from finder.api.sockets import socketio
+from finder.api.auth import auth_bp
+from finder.api.approval_queue import queue_bp
 
 load_dotenv()
 
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
+socketio.init_app(app, cors_allowed_origins="*")
+
+# Initialize database and run migrations
+init_db()
+try:
+    from scripts.migrate_to_multiuser import migrate_to_multiuser
+    migrate_to_multiuser()
+except Exception as e:
+    log.warning(f"Multi-user migration skipped: {e}")
+
+# Register blueprints
+app.register_blueprint(auth_bp)
+app.register_blueprint(queue_bp)
 
 @app.route("/")
 def root():
@@ -186,6 +202,107 @@ def status():
         log.error("/api/status error: %s", e)
         return jsonify({"error": str(e)}), 500
 
+# ── Phase G Health Checks ─────────────────────────────────────────────────────
+
+@app.route("/api/health/system")
+def health_system():
+    try:
+        # Simple query to verify DB is alive
+        db_ok = q1("SELECT 1 as ok").get("ok") == 1
+        return jsonify({"status": "healthy" if db_ok else "degraded", "db_connected": db_ok, "timestamp": datetime.now().isoformat()}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/health/redis")
+def health_redis():
+    try:
+        from finder.shared.celery_app import celery_app
+        # Ping the redis broker using celery inspection
+        i = celery_app.control.inspect()
+        ping_res = i.ping()
+        redis_ok = ping_res is not None
+        return jsonify({"status": "healthy" if redis_ok else "degraded", "ping_response": ping_res}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/health/celery")
+def health_celery():
+    try:
+        from finder.shared.celery_app import celery_app
+        i = celery_app.control.inspect()
+        active = i.active()
+        reserved = i.reserved()
+        return jsonify({
+            "status": "healthy" if active is not None else "degraded",
+            "workers_alive": active is not None,
+            "active_tasks": active,
+            "reserved_tasks": reserved
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/health/scraper")
+def health_scraper():
+    try:
+        from finder.core.scraper.health import get_source_health
+        health = get_source_health("linkedin")
+        return jsonify({
+            "status": "healthy" if health.get("score", 100) > 50 else "cooldown",
+            "health_score": health.get("score"),
+            "cooldown_active": health.get("cooldown_active"),
+            "consecutive_failures": health.get("consecutive_failures")
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/health/memory")
+def health_memory():
+    try:
+        import psutil
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        return jsonify({
+            "status": "healthy",
+            "rss_mb": round(mem_info.rss / (1024 * 1024), 2),
+            "vms_mb": round(mem_info.vms / (1024 * 1024), 2),
+            "cpu_percent": process.cpu_percent()
+        }), 200
+    except ImportError:
+        return jsonify({"status": "error", "error": "psutil not installed"}), 501
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/debug/ai")
+def debug_ai():
+    if os.getenv("DEBUG_AI", "false").lower() != "true":
+        return jsonify({"error": "Forbidden: DEBUG_AI disabled"}), 403
+        
+    try:
+        from finder.shared.redis_cache import get_cache
+        cache = get_cache()
+        circuit_active = cache.get("ai", "circuit_breaker_active")
+        circuit_fails = cache.get("ai", "circuit_breaker_fails") or 0
+        
+        with get_db() as conn:
+            # Audit the DLQ (Dead Letter Queue)
+            dlq_count = q1("SELECT COUNT(*) as c FROM task_failure_audit").get("c", 0)
+            reasoning_cached = q1("SELECT COUNT(*) as c FROM reasoning_cache").get("c", 0)
+            embeddings_cached = q1("SELECT COUNT(*) as c FROM embedding_cache").get("c", 0)
+            
+        return jsonify({
+            "circuit_breaker": {
+                "active": circuit_active == "true",
+                "fails": circuit_fails
+            },
+            "cache": {
+                "reasoning_cache_size": reasoning_cached,
+                "embeddings_cache_size": embeddings_cached
+            },
+            "dlq_size": dlq_count
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route("/api/queue")
 def queue():
     try:
@@ -231,11 +348,13 @@ def queue():
             SELECT q.id, q.status, q.match_score_at_apply, q.goal_boost,
                    q.risk_score, q.is_exploration, q.attempts,
                    q.queued_at, q.updated_at, q.last_error, q.assistant_data,
-                   q.relevance_feedback,
+                   q.relevance_feedback, q.match_explanation,
                    j.title, j.company, j.platform, j.location,
-                   j.salary, j.skills, j.form_type, j.posted_at, j.job_url
+                   j.salary, j.skills, j.form_type, j.posted_at, j.job_url,
+                   rc.reasoning as ai_reasoning
             FROM apply_queue q
             LEFT JOIN jobs j ON j.job_url = q.job_url
+            LEFT JOIN reasoning_cache rc ON rc.job_url = q.job_url
             {where}
             ORDER BY {order}
             LIMIT ? OFFSET ?
@@ -532,24 +651,26 @@ def update_control():
         )
     return jsonify({"key": key, "value": val})
 
+# ── Init Socket.IO ────────────────────────────────────────────────────────────
+socketio.init_app(app)
+
 # ── Actions ───────────────────────────────────────────────────────────────────
 
-_running = {}
+from finder.core.tasks.agent_tasks import (
+    task_run_cycle, task_run_scraper, task_run_matcher, 
+    task_run_ranker, task_generate_assistant, task_sheets_sync
+)
+from finder.shared.database import fetch_all_dict
 
-def _run_async(name, fn):
-    if _running.get(name):
-        return {"status": "already_running", "task": name}
-    def _task():
-        _running[name] = True
-        try:
-            fn()
-        except Exception as exc:
-            log.exception("Background task '%s' failed: %s", name, exc)
-        finally:
-            _running[name] = False
-    t = threading.Thread(target=_task, daemon=True)
-    t.start()
-    return {"status": "started", "task": name}
+def _dispatch_task(task_type, task_func, *args, **kwargs):
+    # Check if already running
+    with get_db() as conn:
+        rows = fetch_all_dict(conn, "SELECT 1 FROM task_status WHERE task_type = ? AND status IN ('queued', 'running')", (task_type,))
+        if rows:
+            return {"status": "already_running", "task": task_type}
+    
+    task = task_func.delay(*args, **kwargs)
+    return {"status": "started", "task": task_type, "task_id": task.id}
 
 @app.route("/api/actions/pause", methods=["POST"])
 def pause():
@@ -577,148 +698,150 @@ def update_job_status(job_id):
     if not new_status:
         return jsonify({"error": "status required"}), 400
     with get_db() as conn:
+        # Fetch job title and skills to record in adaptive memory
+        job = conn.execute(
+            "SELECT j.job_url, j.title, j.skills FROM apply_queue q "
+            "JOIN jobs j ON q.job_url = j.job_url WHERE q.id=?",
+            (job_id,)
+        ).fetchone()
+
         conn.execute(
             "UPDATE apply_queue SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (new_status, job_id)
         )
+        
+        if job and new_status in ("skip", "applied", "applied_manual"):
+            action = "reject" if new_status == "skip" else "approve"
+            try:
+                from finder.core.intelligence.adaptive_memory import record_action
+                from finder.core.intelligence.memory_engine import record_behavior
+                record_action(job["job_url"], action, job["title"], job["skills"])
+                
+                # Phase F: Behavioral Memory
+                if new_status in ("applied", "applied_manual"):
+                    record_behavior(1, "approved", job["title"])
+                elif new_status in ("skip", "skipped"):
+                    record_behavior(1, "rejected", job["title"])
+                    
+                # Optionally trigger skill gap analysis periodically
+                if new_status == "rejected" or new_status == "skip":
+                    from finder.core.tasks.intelligence_tasks import task_analyze_skill_gap
+                    task_analyze_skill_gap.delay(1)
+                    
+            except Exception as e:
+                log.warning("Could not record intelligence metrics: %s", e)
     try:
-        from finder.core.sheets import run_sheets_sync
-        _run_async("sheets", run_sheets_sync)
+        _dispatch_task("sheets", task_sheets_sync)
     except Exception as exc:
         log.warning("Could not start Google Sheets sync after status update: %s", exc)
     return jsonify({"id": job_id, "status": new_status})
 
 @app.route("/api/actions/scrape", methods=["POST"])
 def trigger_scrape():
-    from finder.core.scraper import run_scraper
-    return jsonify(_run_async("scraper", run_scraper))
+    return jsonify(_dispatch_task("scraper", task_run_scraper, headless=True))
 
 @app.route("/api/actions/scrape-visible", methods=["POST"])
 def trigger_scrape_visible():
-    from finder.core.scraper import run_scraper
-    return jsonify(_run_async("scraper", lambda: run_scraper(headless=False)))
+    return jsonify(_dispatch_task("scraper", task_run_scraper, headless=False))
 
 @app.route("/api/actions/match", methods=["POST"])
 def trigger_match():
-    from finder.core.matcher import run_matcher
-    return jsonify(_run_async("matcher", run_matcher))
+    return jsonify(_dispatch_task("matcher", task_run_matcher))
 
 @app.route("/api/actions/rank", methods=["POST"])
 def trigger_rank():
-    from finder.core.queue import run_queue
-    return jsonify(_run_async("queue", run_queue))
+    return jsonify(_dispatch_task("queue", task_run_ranker))
 
 @app.route("/api/actions/cycle", methods=["POST"])
 def trigger_cycle():
-    from finder.core.agent import run_agent_cycle
     data   = request.json or {}
     kwargs = {
         "query":         data.get("query", ""),
         "scraper_pages": int(data.get("scraper_pages", 0) or 0),
         "headless":      data.get("headless", True),
     }
-    return jsonify(_run_async("agent", lambda: run_agent_cycle(**kwargs)))
+    return jsonify(_dispatch_task("agent", task_run_cycle, **kwargs))
+
+@app.route("/api/jobs/<int:job_id>/interview-prep", methods=["POST"])
+def trigger_interview_prep(job_id):
+    with get_db() as conn:
+        job = conn.execute("SELECT job_url FROM apply_queue q JOIN jobs j ON q.job_url = j.job_url WHERE q.id=?", (job_id,)).fetchone()
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+            
+    from finder.core.tasks.interview_tasks import task_generate_interview_prep
+    return jsonify(_dispatch_task("interview", task_generate_interview_prep, job["job_url"]))
+
+@app.route("/api/jobs/<int:job_id>/interview-prep", methods=["GET"])
+def get_interview_prep(job_id):
+    with get_db() as conn:
+        job = conn.execute("SELECT job_url FROM apply_queue q JOIN jobs j ON q.job_url = j.job_url WHERE q.id=?", (job_id,)).fetchone()
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+            
+        key = f"prep_{job['job_url']}"
+        row = conn.execute("SELECT value FROM user_controls WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return jsonify({"status": "pending"})
+            
+        import json
+        return jsonify({"status": "ready", "data": json.loads(row["value"])})
+
+@app.route("/api/dlq", methods=["GET"])
+def get_dlq():
+    with get_db() as conn:
+        rows = fetch_all_dict(conn, "SELECT * FROM task_failure_audit ORDER BY created_at DESC LIMIT 50")
+    return jsonify(rows)
+
+@app.route("/api/dlq/<int:dlq_id>/replay", methods=["POST"])
+def replay_dlq(dlq_id):
+    with get_db() as conn:
+        task = conn.execute("SELECT * FROM task_failure_audit WHERE id = ?", (dlq_id,)).fetchone()
+        if not task:
+            return jsonify({"error": "Not found"}), 404
+        
+        # We delete the audit log since we are replaying
+        conn.execute("DELETE FROM task_failure_audit WHERE id = ?", (dlq_id,))
+        
+    task_type = task["task_type"]
+    if task_type == "discovery":
+        from finder.core.tasks.agent_tasks import task_run_discovery
+        return jsonify(_dispatch_task("discovery", task_run_discovery))
+    elif task_type == "scraper":
+        return jsonify(_dispatch_task("scraper", task_run_scraper))
+    else:
+        return jsonify({"error": "Unknown task type for replay"}), 400
+
+@app.route("/api/notifications", methods=["GET"])
+def get_notifications():
+    with get_db() as conn:
+        rows = fetch_all_dict(conn, "SELECT * FROM notifications WHERE user_id=1 ORDER BY created_at DESC LIMIT 20")
+    return jsonify(rows)
+
+@app.route("/api/notifications/read", methods=["POST"])
+def mark_notifications_read():
+    with get_db() as conn:
+        conn.execute("UPDATE notifications SET read_status = 1 WHERE user_id=1 AND read_status = 0")
+    return jsonify({"success": True})
+
+@app.route("/api/resume/versions", methods=["GET"])
+def get_resume_versions():
+    with get_db() as conn:
+        rows = fetch_all_dict(conn, "SELECT id, created_at FROM resume_versions WHERE user_id=1 ORDER BY created_at DESC")
+    return jsonify(rows)
 
 @app.route("/api/actions/status")
 def action_status():
-    return jsonify({k: v for k, v in _running.items()})
+    with get_db() as conn:
+        rows = fetch_all_dict(conn, "SELECT task_type FROM task_status WHERE status IN ('queued', 'running')")
+        running = {r["task_type"]: True for r in rows}
+    return jsonify(running)
 
 
 # ── Resume Upload & Management ────────────────────────────────────────────────
 
-@app.route("/api/resume", methods=["GET"])
-def get_resume():
-    """Return the current resume skills and metadata."""
-    try:
-        # Check DB for most recently uploaded resume
-        row = q1("SELECT filename, skills, uploaded_at FROM resume_data ORDER BY uploaded_at DESC LIMIT 1")
-        if row:
-            skills = json.loads(row.get("skills") or "[]") if row.get("skills") else []
-            return jsonify({
-                "filename":    row.get("filename", ""),
-                "skills":      skills,
-                "uploaded_at": row.get("uploaded_at", ""),
-                "source":      "db",
-            })
-        # Fallback: check filesystem
-        resume_path = os.getenv("RESUME_PATH", RESUME_PATH)
-        if os.path.exists(resume_path):
-            from finder.core.matcher.service import parse_resume, extract_skills
-            text   = parse_resume(resume_path)
-            skills = extract_skills(text) if text else []
-            return jsonify({
-                "filename":    os.path.basename(resume_path),
-                "skills":      skills,
-                "uploaded_at": "",
-                "source":      "filesystem",
-            })
-        # Fallback: env skills
-        env_skills = [s.strip() for s in os.getenv("USER_SKILLS", "").split(",") if s.strip()]
-        return jsonify({"filename": "", "skills": env_skills, "source": "env"})
-    except Exception as e:
-        log.error("/api/resume GET error: %s", e)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/resume", methods=["POST"])
-def upload_resume():
-    """Upload a resume PDF/DOCX, extract skills, store to DB and filesystem."""
-    try:
-        if "file" not in request.files:
-            return jsonify({"error": "No file uploaded. Use multipart/form-data with key 'file'."}), 400
-
-        f = request.files["file"]
-        filename = f.filename or "resume"
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in (".pdf", ".docx", ".doc", ".txt"):
-            return jsonify({"error": "Unsupported file type. Use PDF, DOCX, DOC, or TXT."}), 400
-
-        # Save to resumes directory
-        resumes_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))
-        ))), "resumes")
-        os.makedirs(resumes_dir, exist_ok=True)
-        save_path = os.path.join(resumes_dir, f"resume{ext}")
-        f.save(save_path)
-        log.info("Resume saved to: %s", save_path)
-
-        # Parse and extract skills
-        from finder.core.matcher.service import parse_resume, extract_skills
-        raw_text = parse_resume(save_path)
-        skills   = extract_skills(raw_text) if raw_text else []
-        log.info("Extracted %d skills from resume: %s", len(skills), skills)
-
-        # Persist to DB
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO resume_data (filename, raw_text, skills, uploaded_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-                (filename, raw_text[:10000], json.dumps(skills))
-            )
-
-        # Update query_weights based on new resume skills
-        from finder.core.intelligence.adaptive_search import initialize_queries
-        initialize_queries()
-
-        # Reset unscored pending jobs so they get re-matched with new resume
-        with get_db() as conn:
-            reset_count = conn.execute(
-                "UPDATE apply_queue SET match_score_at_apply = NULL, status = 'pending', "
-                "updated_at = CURRENT_TIMESTAMP "
-                "WHERE status IN ('pending', 'ready_to_apply') AND match_score_at_apply IS NOT NULL"
-            ).rowcount if hasattr(
-                conn.execute("SELECT 1"), 'rowcount'
-            ) else 0
-
-        return jsonify({
-            "success":     True,
-            "filename":    filename,
-            "skills":      skills,
-            "skill_count": len(skills),
-            "message":     f"Resume uploaded. Extracted {len(skills)} skills. Queue will be re-matched on next cycle.",
-        })
-    except Exception as e:
-        log.error("/api/resume POST error: %s", e)
-        return jsonify({"error": str(e)}), 500
+from finder.api.resume import bp as resume_bp
+app.register_blueprint(resume_bp)
 
 
 @app.route("/api/actions/generate-assistant", methods=["POST"])
@@ -727,38 +850,7 @@ def trigger_generate_assistant():
     Pre-generate assistant_data for all ready_to_apply jobs that are missing it.
     Safe to call independently — useful to populate the panel without running a full cycle.
     """
-    def _run():
-        from finder.core.apply_bot.answer_generator import generate_smart_answers
-        generated = 0
-        errors    = 0
-        with get_db() as conn:
-            jobs = [dict(r) for r in conn.execute(
-                """
-                SELECT q.id, q.job_url, q.assistant_data,
-                       j.title, j.company, j.skills, j.description
-                FROM apply_queue q
-                LEFT JOIN jobs j ON j.job_url = q.job_url
-                WHERE q.status IN ('pending', 'ready_to_apply', 'opened')
-                  AND (q.assistant_data IS NULL OR q.assistant_data = '')
-                ORDER BY q.match_score_at_apply DESC NULLS LAST
-                LIMIT 50
-                """
-            ).fetchall()]
-        with get_db() as conn:
-            for job in jobs:
-                try:
-                    ai_data = generate_smart_answers(job)
-                    conn.execute(
-                        "UPDATE apply_queue SET assistant_data=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (json.dumps(ai_data), job["id"])
-                    )
-                    generated += 1
-                except Exception as ex:
-                    log.error("assistant_data gen failed job id=%s: %s", job["id"], ex)
-                    errors += 1
-        log.info("generate-assistant: generated=%d errors=%d", generated, errors)
-
-    return jsonify(_run_async("generate_assistant", _run))
+    return jsonify(_dispatch_task("assistant", task_generate_assistant))
 
 
 @app.route("/api/actions/reset-pending", methods=["POST"])
@@ -908,6 +1000,163 @@ def health():
         "db": db_status,
         "ts": datetime.now().isoformat(),
     })
+
+# ── Phase B: AI Generation ────────────────────────────────────────────────────
+
+from finder.core.tasks.ai_tasks import task_generate_ai_content as task_generate_ai, task_generate_followup as task_draft_followup
+
+@app.route("/api/ai/generate", methods=["POST"])
+def ai_generate():
+    """
+    Trigger AI content generation asynchronously.
+    Body: { generation_type: str, context: dict, job_id?: int }
+    generation_type: cover_letter | interview_answer | followup_email | hire_me_pitch
+    """
+    data = request.json or {}
+    gen_type = data.get("generation_type", "cover_letter")
+    context  = data.get("context", {})
+    job_id   = data.get("job_id")
+
+    if not context:
+        return jsonify({"error": "context required"}), 400
+
+    valid_types = {"cover_letter", "interview_answer", "followup_email", "hire_me_pitch"}
+    if gen_type not in valid_types:
+        return jsonify({"error": f"Invalid generation_type. Valid: {sorted(valid_types)}"}), 400
+
+    task = task_generate_ai.delay(gen_type, context, job_id)
+    return jsonify({"status": "queued", "task_id": task.id, "generation_type": gen_type}), 202
+
+
+@app.route("/api/ai/history")
+def ai_history():
+    """Return recent AI generations for the current user (last 50)."""
+    try:
+        rows = q("""
+            SELECT id, generation_type, provider, response, cached, created_at
+            FROM ai_generations
+            ORDER BY created_at DESC LIMIT 50
+        """)
+        return jsonify(rows)
+    except Exception as e:
+        log.error("/api/ai/history error: %s", e)
+        return jsonify([])
+
+
+@app.route("/api/ai/generate/<task_id>/result")
+def ai_generate_result(task_id):
+    """Poll for a generation task result."""
+    try:
+        from finder.shared.celery_app import celery_app as _cel
+        result = _cel.AsyncResult(task_id)
+        if result.ready():
+            if result.successful():
+                return jsonify({"status": "done", "result": result.result})
+            else:
+                return jsonify({"status": "failed", "error": str(result.result)}), 200
+        return jsonify({"status": "pending"})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+# ── Phase B: Analytics KPIs ───────────────────────────────────────────────────
+
+@app.route("/api/analytics/kpis")
+def analytics_kpis():
+    """Return rich analytics KPIs computed from the DB."""
+    try:
+        from finder.core.analytics.service import compute_kpis
+        kpis = compute_kpis()
+        return jsonify(kpis)
+    except Exception as e:
+        log.error("/api/analytics/kpis error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/analytics/skills")
+def analytics_skills():
+    """Top skills from matched jobs."""
+    try:
+        rows = q("""
+            SELECT skill, SUM(CASE WHEN outcome IN ('applied','interview','offer') THEN count ELSE 0 END) as positive,
+                   SUM(count) as total
+            FROM skill_outcome_map GROUP BY skill
+            HAVING total >= 1 ORDER BY positive DESC LIMIT 20
+        """)
+        return jsonify(rows)
+    except Exception as e:
+        log.error("/api/analytics/skills error: %s", e)
+        return jsonify([])
+
+
+# ── Phase B: Follow-up Queue ──────────────────────────────────────────────────
+
+@app.route("/api/followups")
+def get_followups():
+    """Return follow-up drafts ordered by created_at DESC."""
+    try:
+        status_filter = request.args.get("status", "")
+        if status_filter:
+            rows = q(
+                "SELECT * FROM followup_queue WHERE status=? ORDER BY created_at DESC LIMIT 100",
+                (status_filter,)
+            )
+        else:
+            rows = q("SELECT * FROM followup_queue ORDER BY created_at DESC LIMIT 100")
+        return jsonify(rows)
+    except Exception as e:
+        log.error("/api/followups error: %s", e)
+        return jsonify([])
+
+
+@app.route("/api/followups/generate", methods=["POST"])
+def generate_followup():
+    """
+    Trigger AI follow-up draft generation.
+    Body: { job_url: str, job_title: str, company: str, days_since_apply?: int }
+    """
+    data = request.json or {}
+    job_url   = data.get("job_url", "")
+    job_title = data.get("job_title", "")
+    company   = data.get("company", "")
+    days      = int(data.get("days_since_apply", 7))
+
+    if not job_url:
+        return jsonify({"error": "job_url required"}), 400
+
+    task = task_draft_followup.delay(job_url, "recruiter", company, job_title)
+    return jsonify({"status": "queued", "task_id": task.id}), 202
+
+
+@app.route("/api/followups/<int:fup_id>/approve", methods=["POST"])
+def approve_followup(fup_id):
+    """Mark a follow-up draft as approved (ready to send manually)."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE followup_queue SET status='approved', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (fup_id,)
+        )
+    return jsonify({"id": fup_id, "status": "approved"})
+
+
+@app.route("/api/followups/<int:fup_id>/dismiss", methods=["POST"])
+def dismiss_followup(fup_id):
+    """Dismiss / reject a follow-up draft."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE followup_queue SET status='dismissed', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (fup_id,)
+        )
+    return jsonify({"id": fup_id, "status": "dismissed"})
+
+
+@app.route("/api/followups/<int:fup_id>", methods=["DELETE"])
+def delete_followup(fup_id):
+    """Hard-delete a follow-up record."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM followup_queue WHERE id=?", (fup_id,))
+    return jsonify({"deleted": fup_id})
+
 
 # ── Global error handlers — always return JSON, never HTML tracebacks ─────────
 

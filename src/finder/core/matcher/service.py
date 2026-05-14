@@ -135,9 +135,11 @@ def _tfidf_cosine(doc_a: str, doc_b: str) -> float:
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
 from finder.core.intelligence.profile import get_profile_summary
+from finder.core.intelligence.semantic_matcher import calculate_semantic_similarity
+from finder.core.intelligence.goals import get_user_goals
+from finder.core.intelligence.adaptive_memory import get_adaptive_modifiers
 
-
-def score_job(resume_text: str, job: dict) -> float:
+def score_job(resume_text: str, job: dict) -> tuple[float, str]:
     job_text = " ".join([
         job.get("title", ""),
         job.get("description", ""),
@@ -145,7 +147,7 @@ def score_job(resume_text: str, job: dict) -> float:
     ]).lower()
 
     if not resume_text or not job_text.strip():
-        return 0.0
+        return 0.0, "Missing resume or job text."
 
     # User profile for intelligent alignment
     profile     = get_profile_summary()
@@ -156,37 +158,70 @@ def score_job(resume_text: str, job: dict) -> float:
     r_skills = set(extract_skills(resume_text))
     j_skills = set(extract_skills(job_text))
 
-    # Merge user_skills from profile with parsed resume skills
     combined_skills = user_skills | r_skills
 
-    # 1. Skill overlap score (60% weight)
+    # 1. Skill overlap score (20% weight per Phase C spec)
     overlap   = len(combined_skills & j_skills)
-    kw_score  = (overlap / len(j_skills) * 100) if j_skills else 0.0
+    skill_score  = (overlap / len(j_skills) * 100) if j_skills else 0.0
 
-    # 2. Semantic similarity via pure-Python TF-IDF (40% weight)
+    # 2. TF-IDF score (30% weight)
     try:
-        cos_score = _tfidf_cosine(resume_text.lower(), job_text) * 100
+        tfidf_score = _tfidf_cosine(resume_text.lower(), job_text) * 100
     except Exception:
-        cos_score = 0.0
+        tfidf_score = 0.0
 
-    base_score = kw_score * 0.6 + cos_score * 0.4
+    # 3. Semantic Similarity (50% weight)
+    semantic_sim = calculate_semantic_similarity(resume_text, job_text, job_url=job.get("job_url", "unknown"))
+    semantic_score = semantic_sim * 100
 
-    # 3. Intelligent boosts
+    # Hybrid Formula
+    base_score = (semantic_score * 0.5) + (tfidf_score * 0.3) + (skill_score * 0.2)
+
+    # Intelligent boosts & Adaptive memory
     boost = 0
     title = job.get("title", "").lower()
+    reasons = []
+    
+    reasons.append(f"Semantic alignment: {int(semantic_score)}%")
+    reasons.append(f"Keyword match: {int(skill_score)}% ({overlap} matching skills)")
 
+    # Base profile logic
     if any(role in title for role in user_roles):
-        boost += 10                                          # role alignment
+        boost += 10
+        reasons.append("Role aligns with your profile goals")
 
-    if is_fresher and any(
-        k in job_text for k in ["fresher", "entry level", "graduate", "0-1 year"]
-    ):
-        boost += 5                                           # fresher-friendly
+    if is_fresher and any(k in job_text for k in ["fresher", "entry level", "graduate", "0-1 year"]):
+        boost += 5
+        reasons.append("Identified as an entry-level friendly role")
 
     critical_matches = len(combined_skills & j_skills)
-    boost += min(critical_matches * 2, 10)                   # exact tech match
+    if critical_matches > 0:
+        boost += min(critical_matches * 2, 10)
+        reasons.append("Strong tech stack overlap detected")
 
-    return round(min(base_score + boost, 100.0), 2)
+    # Goal-Aware Ranking
+    user_goals = get_user_goals(user_id=job.get("user_id", 1))
+    target_roles = user_goals.get("target_role", [])
+    if target_roles:
+        if any(tr.lower() in title for tr in target_roles):
+            boost += 15
+            reasons.append("Matches your explicit target role goal")
+
+    remote_pref = user_goals.get("remote_preference")
+    if remote_pref == "yes" and ("remote" in job_text or "work from home" in job_text):
+        boost += 10
+        reasons.append("Matches your remote work preference")
+
+    # Adaptive Memory
+    adaptive_mod, adaptive_reasons = get_adaptive_modifiers(job.get("title", ""))
+    if adaptive_mod != 0:
+        boost += adaptive_mod
+        reasons.extend(adaptive_reasons)
+
+    final_score = round(min(max(base_score + boost, 0.0), 100.0), 2)
+    explanation = "\n- ".join(["Matched because:"] + reasons)
+    
+    return final_score, explanation
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
@@ -224,12 +259,12 @@ def run_matcher(resume_path: str = "", min_match: float = 0.0) -> dict:
     with get_db() as conn:
         for job in jobs:
             try:
-                score = score_job(resume_text, job)
+                score, explanation = score_job(resume_text, job)
                 # FIX: Jobs that pass threshold get 'ready_to_apply', not 'pending'
                 new_status = "ready_to_apply" if score >= threshold else "skip"
                 conn.execute(
-                    "UPDATE apply_queue SET match_score_at_apply = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (score, new_status, job["id"]),
+                    "UPDATE apply_queue SET match_score_at_apply = ?, match_explanation = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (score, explanation, new_status, job["id"]),
                 )
                 stats["scored"] += 1
                 scores.append(score)
@@ -240,6 +275,11 @@ def run_matcher(resume_path: str = "", min_match: float = 0.0) -> dict:
                         "title":   job.get("title", ""),
                         "company": job.get("company", ""),
                     })
+                    
+                    # Phase F: Trigger LLM Reasoning
+                    from finder.core.tasks.intelligence_tasks import task_generate_reasoning
+                    task_generate_reasoning.delay(job["job_url"], resume_text, job.get("description", ""), score)
+                    
                 else:
                     stats["skipped"] += 1
                 log.debug(f"  {job.get('title','?')} @ {job.get('company','?')} → {score} [{new_status}]")

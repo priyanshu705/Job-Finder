@@ -28,3 +28,20 @@ docx2txt==0.8
 # scikit-learn — replaced with pure-Python TF-IDF in matcher/service.py
 # spacy        — replaced with regex keyword extraction in matcher/service.py
 # numpy        — was only required as a transitive dep of scikit-learn
+
+# ── Asynchronous & Realtime (Phase 2) ──────────────────────────────────────────
+celery[redis]==5.4.0
+redis==5.0.4
+flask-socketio==5.3.6
+eventlet==0.36.1
+
+# ── Intelligence & Semantic Matching (Phase C) ────────────────────────────────
+sentence-transformers==3.0.1
+scikit-learn==1.5.0
+
+# ── Scale & Scraper Safety (Phase D) ──────────────────────────────────────────
+cryptography==42.0.5
+
+# ── Operational Hardening (Phase G) ───────────────────────────────────────────
+psutil==5.9.8
+google-generativeai==0.5.2

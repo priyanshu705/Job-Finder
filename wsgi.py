@@ -14,8 +14,10 @@ load_dotenv()
 
 # Initialize the database schema on first boot
 from finder.shared.database import init_db
+from finder.scripts.migrate_task_status import run_migration as migrate_task_status
 try:
     init_db()
+    migrate_task_status()
 except Exception as e:
     print(f"[wsgi] DB init warning: {e}")
 

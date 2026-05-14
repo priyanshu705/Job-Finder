@@ -11,7 +11,7 @@ services:
     # ── Start ────────────────────────────────────────────────────────────────
     # 1 worker (free tier limit). timeout increased for long-running jobs.
     # Verify Chromium exists before Gunicorn imports code that can launch Playwright.
-    startCommand: python scripts/ensure_playwright.py && gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
+    startCommand: python scripts/ensure_playwright.py && gunicorn --worker-class eventlet --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload wsgi:app
 
     # ── Health check ─────────────────────────────────────────────────────────
     healthCheckPath: /api/health
@@ -46,5 +46,36 @@ services:
       - key: CORS_ORIGINS
         sync: false   # e.g. https://your-frontend.vercel.app
 
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autoapply-redis
+          property: connectionString
+
       - key: SECRET_KEY
         generateValue: true
+
+  - type: redis
+    name: autoapply-redis
+    plan: free
+    region: singapore
+
+  - type: worker
+    name: autoapply-celery-worker
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install --with-deps chromium && PLAYWRIGHT_BROWSERS_PATH=0 python scripts/ensure_playwright.py
+    startCommand: python scripts/ensure_playwright.py && celery -A finder.shared.celery_app worker --loglevel=info
+    envVars:
+      - key: PYTHONPATH
+        value: src
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autoapply-redis
+          property: connectionString
+      - key: DATABASE_URL
+        sync: false
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"

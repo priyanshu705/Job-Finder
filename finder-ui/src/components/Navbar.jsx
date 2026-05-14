@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { RefreshCw, Play, Pause, RotateCcw, Menu } from 'lucide-react'
+import { RefreshCw, Play, Pause, RotateCcw, Menu, Bell } from 'lucide-react'
 
 const PAGE_TITLES = {
   dashboard: 'Dashboard',
@@ -104,6 +104,20 @@ const Navbar = memo(function Navbar({ page, running, isPaused, lastUpdated, onCy
           ↻ {fmt(lastUpdated)}
         </span>
       )}
+
+      {/* Notifications */}
+      <button
+        onClick={() => {}} // Placeholder for notification toggle
+        title="Notifications"
+        className="p-2 rounded-xl transition-all duration-200 relative"
+        style={{ color: 'rgba(148,163,184,0.6)', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+        onMouseEnter={e => { e.currentTarget.style.color = '#34d399'; e.currentTarget.style.background = 'rgba(52,211,153,0.1)' }}
+        onMouseLeave={e => { e.currentTarget.style.color = 'rgba(148,163,184,0.6)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
+      >
+        <Bell size={15} />
+        {/* Unread dot */}
+        <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+      </button>
 
       {/* Refresh */}
       <button

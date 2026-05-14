@@ -1,12 +1,17 @@
 // src/components/Sidebar.jsx — UPGRADED: glassmorphism sidebar with glow active states
-import { LayoutDashboard, ListOrdered, Target, Activity, BarChart2, Settings, Zap, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, ListOrdered, Target, Activity, BarChart2, Settings, Zap, ChevronLeft, ChevronRight, UserCircle, Sparkles, Mail } from 'lucide-react'
 
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard',  icon: LayoutDashboard },
-  { id: 'queue',     label: 'Queue',       icon: ListOrdered },
-  { id: 'goals',     label: 'Goals',       icon: Target },
+  { id: 'resume',    label: 'AI Profile',  icon: UserCircle },
+  { id: 'dashboard', label: 'Dashboard',   icon: LayoutDashboard },
+  { id: 'queue',     label: 'Queue',        icon: ListOrdered },
+  { id: 'goals',     label: 'Goals',        icon: Target },
+  { id: 'copilot',   label: 'AI Copilot',  icon: Sparkles },
+  { id: 'insights',  label: 'Career Insights', icon: Target },
+  { id: 'followups', label: 'Follow-ups',  icon: Mail },
   { id: 'activity',  label: 'Activity',    icon: Activity },
   { id: 'analytics', label: 'Analytics',   icon: BarChart2 },
+  { id: 'source-health', label: 'Source Health', icon: Target },
   { id: 'settings',  label: 'Settings',    icon: Settings },
 ]
 
