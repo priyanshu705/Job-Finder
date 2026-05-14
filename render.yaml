@@ -1,4 +1,10 @@
 services:
+  - type: psql
+    name: autoapply-db
+    plan: free
+    region: singapore
+    ipAllowList: [] # Internal only
+
   - type: web
     name: autoapply-ai-backend
     env: python
@@ -37,10 +43,11 @@ services:
         value: 3.11.9
 
       - key: DATABASE_URL
-        sync: false   # e.g. Supabase/Postgres URL
-
+        fromDatabase:
+          name: autoapply-db
+          property: connectionString
       - key: CORS_ORIGINS
-        sync: false   # e.g. https://your-frontend.vercel.app
+        value: "*" # Set to your frontend URL after deployment for better security
 
       - key: REDIS_URL
         fromService:
@@ -73,6 +80,8 @@ services:
           name: autoapply-redis
           property: connectionString
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: autoapply-db
+          property: connectionString
       - key: CELERY_WORKER_PROCESS
         value: "true"
