@@ -1,10 +1,10 @@
-services:
-  - type: psql
-    name: autoapply-db
+databases:
+  - name: autoapply-db
     plan: free
     region: singapore
     ipAllowList: [] # Internal only
 
+services:
   - type: web
     name: autoapply-ai-backend
     env: python
