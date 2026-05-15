@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 from finder.shared.database import get_db, _USE_POSTGRES, init_db
 from finder.shared.config import LOGS_DIR
 from finder.core.agent import run_agent_cycle
-from finder.api.sockets import socketio
 from finder.api.auth import auth_bp
 from finder.api.approval_queue import queue_bp
 
@@ -27,7 +26,6 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
-socketio.init_app(app, cors_allowed_origins="*")
 
 # Initialize database and run migrations
 init_db()
@@ -658,9 +656,6 @@ def update_control():
             (str(val), key)
         )
     return jsonify({"key": key, "value": val})
-
-# ── Init Socket.IO ────────────────────────────────────────────────────────────
-socketio.init_app(app)
 
 # ── Actions ───────────────────────────────────────────────────────────────────
 
