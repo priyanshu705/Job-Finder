@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "finder"
 version = "1.0.0"
 description = "Job Finder AI Application"
-requires-python = ">=3.11,<3.12"
+requires-python = "==3.11.*"
 dependencies = [
     "flask==3.0.3",
     "flask-cors==4.0.0",
