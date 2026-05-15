@@ -1,0 +1,64 @@
+databases:
+  - name: autoapply-db
+    plan: free
+    region: singapore
+    ipAllowList: [] # Internal only
+
+services:
+  - type: web
+    name: autoapply-ai-backend
+    env: python
+    region: singapore
+    plan: free
+    ipAllowList: []
+    buildCommand: python scripts/check_python_version.py && pip install -r requirements.txt && python -m playwright install --with-deps chromium
+    startCommand: python scripts/check_python_version.py && gunicorn app:app
+    envVars:
+      - key: PYTHONPATH
+        value: src
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autoapply-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autoapply-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: FLASK_ENV
+        value: production
+
+  - type: redis
+    name: autoapply-redis
+    plan: free
+    region: singapore
+    ipAllowList: [] # Internal only
+
+  - type: web
+    name: autoapply-celery-worker
+    env: python
+    region: singapore
+    plan: free
+    ipAllowList: []
+    buildCommand: pip install -r requirements.txt && python -m playwright install --with-deps chromium
+    startCommand: celery -A celery_worker.celery worker --loglevel=info --pool=solo
+    envVars:
+      - key: PYTHONPATH
+        value: src
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: autoapply-redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autoapply-db
+          property: connectionString
+      - key: CELERY_WORKER_PROCESS
+        value: "true"

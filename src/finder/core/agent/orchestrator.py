@@ -96,10 +96,33 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
         _report("init", "Launching browser...", "Launching browser session")
         browser = pw.chromium.launch(
             headless=headless,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-breakpad",
+                "--disable-component-update",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--disable-infobars",
+                "--disable-translate",
+                "--hide-scrollbars",
+                "--mute-audio",
+                "--no-first-run",
+                "--window-size=1280,800",
+            ],
+            timeout=int(os.getenv("PLAYWRIGHT_LAUNCH_TIMEOUT_MS", "60000")),
         )
-        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            ignore_https_errors=True,
+        )
         page = context.new_page()
+        page.set_default_timeout(int(os.getenv("PLAYWRIGHT_DEFAULT_TIMEOUT_MS", "45000")))
+        page.set_default_navigation_timeout(int(os.getenv("PLAYWRIGHT_DEFAULT_TIMEOUT_MS", "45000")))
 
         try:
             # 1. Global Login

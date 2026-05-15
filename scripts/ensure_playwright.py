@@ -43,7 +43,7 @@ def main() -> int:
     print("[playwright] Installing Chromium browser...")
 
     subprocess.check_call(
-        [sys.executable, "-m", "playwright", "install", "chromium"],
+        [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
         env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": os.environ["PLAYWRIGHT_BROWSERS_PATH"]},
     )
 
