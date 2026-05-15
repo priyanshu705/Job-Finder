@@ -18,7 +18,6 @@ google-auth==2.29.0
 
 # ── Playwright (browser automation — agent only) ──────────────────────────────
 playwright==1.42.0
-greenlet==3.0.3          # pinned: pre-built wheel avoids C++ compile failure on Render
 
 # ── Document parsing (resume reader — agent only) ──────────────────────────────
 pdfplumber==0.11.0
