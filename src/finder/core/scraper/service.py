@@ -15,8 +15,6 @@ from dotenv import load_dotenv
 from playwright.sync_api import (
     sync_playwright,
     Page,
-    Browser,
-    Error as PlaywrightError,
     TimeoutError as PlaywrightTimeoutError,
 )
 from bs4 import BeautifulSoup
@@ -24,6 +22,7 @@ from bs4 import BeautifulSoup
 from finder.shared.logger import get_logger, screenshot_name
 from finder.shared.database import get_db
 from finder.shared.retry import retry
+from finder.shared.browser_safety import close_quietly, reap_orphan_browser_children
 
 load_dotenv()
 
@@ -234,35 +233,59 @@ def run_scraper(
         # In visible shared-session runs, keep using the same tab so the browser
         # does not appear to get stuck after opening a second details tab.
         detail_page = p if reuse_page_for_details or not context else context.new_page()
-        total_jobs = len(all_jobs)
-        for idx, job in enumerate(all_jobs, start=1):
-            if deadline > 0 and time.time() > deadline:
-                stats["timed_out"] = True
-                break
-            if job["job_url"] in existing_urls:
-                stats["skipped"] += 1
-                continue
-            _progress(f"Fetching job details {idx}/{total_jobs} for '{search_query}'...")
-            job = _fetch_job_detail(detail_page, job)
-            if _insert_job(job):
-                stats["new_jobs"] += 1
-                if _enqueue_job(job): stats["enqueued"] += 1
-            else: stats["skipped"] += 1
-            time.sleep(0.8)
-        
-        if context and detail_page != p:
-            detail_page.close()
+        try:
+            total_jobs = len(all_jobs)
+            for idx, job in enumerate(all_jobs, start=1):
+                if deadline > 0 and time.time() > deadline:
+                    stats["timed_out"] = True
+                    break
+                if job["job_url"] in existing_urls:
+                    stats["skipped"] += 1
+                    continue
+                _progress(f"Fetching job details {idx}/{total_jobs} for '{search_query}'...")
+                job = _fetch_job_detail(detail_page, job)
+                if _insert_job(job):
+                    stats["new_jobs"] += 1
+                    if _enqueue_job(job): stats["enqueued"] += 1
+                else: stats["skipped"] += 1
+                time.sleep(0.8)
+        finally:
+            if context and detail_page != p:
+                try:
+                    detail_page.close()
+                except Exception:
+                    pass
 
     if page:
         log.info("Reusing existing session for scraper.")
         _run_with_page(page, page.context, reuse_page_for_details=True)
     else:
+        browser = None
+        context = None
+        p = None
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=headless, slow_mo=SLOW_MO, args=["--no-sandbox", "--disable-dev-shm-usage"])
-            context = browser.new_context(user_agent="Mozilla/5.0 ...", viewport={"width": 1280, "height": 800})
-            p = context.new_page()
-            _run_with_page(p, context, reuse_page_for_details=False)
-            browser.close()
+            try:
+                # Retry browser launch once to reduce transient runtime failures.
+                for attempt in range(2):
+                    try:
+                        browser = pw.chromium.launch(
+                            headless=headless,
+                            slow_mo=SLOW_MO,
+                            args=["--no-sandbox", "--disable-dev-shm-usage"],
+                        )
+                        break
+                    except Exception:
+                        if attempt == 1:
+                            raise
+                        time.sleep(1.5)
+
+                context = browser.new_context(user_agent="Mozilla/5.0 ...", viewport={"width": 1280, "height": 800})
+                p = context.new_page()
+                _run_with_page(p, context, reuse_page_for_details=False)
+            finally:
+                for closable in (p, context, browser):
+                    close_quietly(closable)
+                reap_orphan_browser_children()
 
     stats["finished_at"] = datetime.now(timezone.utc).isoformat()
     return stats

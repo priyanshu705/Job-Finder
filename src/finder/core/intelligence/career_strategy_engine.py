@@ -7,7 +7,6 @@ Generates skill gap analyses and career insights based on mismatch patterns.
 
 import os
 import logging
-from typing import List, Dict
 from finder.shared.database import get_db
 
 log = logging.getLogger("career_strategy")

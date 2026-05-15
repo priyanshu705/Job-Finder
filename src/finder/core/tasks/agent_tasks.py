@@ -58,7 +58,7 @@ def _task_wrapper(self, task_type: str, func, *args, **kwargs):
                 
             raise exc
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3, time_limit=900, soft_time_limit=840)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=10, time_limit=900, soft_time_limit=840)
 def task_run_cycle(self, query: str = "", scraper_pages: int = 0, headless: bool = True):
     from finder.core.agent import run_agent_cycle
     from finder.shared.redis_cache import get_cache
@@ -71,7 +71,7 @@ def task_run_cycle(self, query: str = "", scraper_pages: int = 0, headless: bool
     finally:
         cache.release_lock("cycle")
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3, time_limit=600, soft_time_limit=540)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=10, time_limit=600, soft_time_limit=540)
 def task_run_scraper(self, headless: bool = True):
     from finder.core.scraper.service import run_scraper
     from finder.shared.redis_cache import get_cache
@@ -84,35 +84,35 @@ def task_run_scraper(self, headless: bool = True):
     finally:
         cache.release_lock("scraper")
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=2, time_limit=600, soft_time_limit=540)
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=10, time_limit=600, soft_time_limit=540)
 def task_run_discovery(self, headless: bool = True):
     from finder.core.scraper.discovery import run_discovery_scrapers
     return _task_wrapper(self, 'discovery', lambda: run_discovery_scrapers(headless=headless))
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3, time_limit=300, soft_time_limit=270)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=10, time_limit=300, soft_time_limit=270)
 def task_run_matcher(self):
     from finder.core.matcher import run_matcher
     return _task_wrapper(self, 'matcher', run_matcher)
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3, time_limit=180, soft_time_limit=150)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=10, time_limit=180, soft_time_limit=150)
 def task_run_ranker(self):
     from finder.core.queue import run_queue
     return _task_wrapper(self, 'queue', run_queue)
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3, time_limit=300, soft_time_limit=270)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=10, time_limit=300, soft_time_limit=270)
 def task_generate_assistant(self):
     from finder.core.apply_bot.answer_generator import generate_smart_answers
     return _task_wrapper(self, 'assistant', generate_smart_answers)
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
 def task_sheets_sync(self):
     from finder.core.sheets import run_sheets_sync
     return _task_wrapper(self, 'sheets', run_sheets_sync)
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=1)
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=10)
 def task_parse_resume(self, file_path: str):
     from finder.shared.resume_parser import analyze_resume
-    from finder.shared.database import get_db, transaction
+    from finder.shared.database import transaction
     import json
     
     emit_event('parsing:started', {'file': file_path})

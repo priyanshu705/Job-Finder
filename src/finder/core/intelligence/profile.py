@@ -1,5 +1,4 @@
 import os
-import re
 from finder.shared.logger import get_logger
 
 log = get_logger("profile_analyzer")

@@ -5,13 +5,13 @@ Hardened Application Assistant — AutoApply AI.
 Opens job pages for human review without blocking the agent cycle.
 """
 
-import os
 import json
 import time
 import random
 from playwright.sync_api import sync_playwright, Page
 from finder.shared.logger import get_logger
 from finder.shared.database import get_db
+from finder.shared.browser_safety import close_quietly, reap_orphan_browser_children
 from finder.core.apply_bot.answer_generator import generate_smart_answers  # single source of truth
 
 log = get_logger("apply_assistant")
@@ -149,6 +149,9 @@ def run_apply_assistant(headless: bool = False, page: Page = None) -> dict:
     if page:
         _process(page)
     else:
+        browser = None
+        ctx = None
+        p = None
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
                 headless=headless,
@@ -159,7 +162,9 @@ def run_apply_assistant(headless: bool = False, page: Page = None) -> dict:
             try:
                 _process(p)
             finally:
-                browser.close()
+                for closable in (p, ctx, browser):
+                    close_quietly(closable)
+                reap_orphan_browser_children()
 
     log.info(
         f"Apply Assistant done: opened={stats['opened']} "

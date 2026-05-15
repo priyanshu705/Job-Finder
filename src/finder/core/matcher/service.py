@@ -10,10 +10,8 @@ computed with only the standard library (math, collections, re).
 
 import os
 import re
-import json
 import math
 from collections import Counter
-from typing import Optional
 
 import pdfplumber
 import docx2txt

@@ -12,7 +12,7 @@ import argparse
 import sqlite3
 import re
 import threading
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, date
 
 from dotenv import load_dotenv
 from finder.shared.config import DB_PATH

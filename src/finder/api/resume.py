@@ -8,14 +8,13 @@ Handles upload, parsing orchestration, and queue reset triggers.
 import os
 import json
 import uuid
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request
 from finder.shared.database import get_db, fetch_one_dict, transaction
 from finder.shared.config import get_resume_upload_dir, ENABLE_RESUME_UPLOADS
 from finder.shared.response import success_response, error_response
-from finder.shared.errors import ResumeError, InvalidFileError, ParsingError, FileTooLargeError
+from finder.shared.errors import ResumeError
 from finder.shared.validation import validate_resume_upload
 from finder.shared.logging import get_logger, timed
-from finder.api.sockets import emit_event
 
 log = get_logger("api.resume")
 bp = Blueprint("resume", __name__, url_prefix="/api/resume")

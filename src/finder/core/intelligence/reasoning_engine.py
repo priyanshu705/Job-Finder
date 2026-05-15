@@ -21,17 +21,17 @@ def generate_reasoning(job_url: str, resume_skills: str, job_description: str, s
     # 0. Check Circuit Breaker & Memory Panic
     try:
         from finder.shared.redis_cache import get_cache
-        from finder.shared.worker_memory_safety import WorkerHealthCheck
-        
-        # Proactively enforce panic check
-        is_panic = WorkerHealthCheck.check_and_enforce_panic_mode()
-        
         cache = get_cache()
         if cache.get("ai", "circuit_breaker_active") == "true":
             return f"Semantic Match: {semantic_score}% (AI reasoning temporarily disabled due to API limits)"
-        if is_panic or cache.get("system", "memory_panic") == "true":
-            return f"Semantic Match: {semantic_score}% (AI reasoning paused to stabilize system memory)"
-    except:
+        try:
+            import psutil
+            rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+            if rss_mb > float(os.getenv("WORKER_MEMORY_PANIC_MB", "900")):
+                return f"Semantic Match: {semantic_score}% (AI reasoning paused to stabilize system memory)"
+        except Exception:
+            pass
+    except Exception:
         pass
 
     # 1. Check Cache

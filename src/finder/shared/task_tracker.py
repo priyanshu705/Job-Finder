@@ -57,3 +57,63 @@ def mark_task_completed(task_id: str):
             """, (task_id,))
     except Exception as e:
         log.error("Failed to mark task %s as completed: %s", task_id, e)
+
+
+def mark_stale_tasks_failed(stale_minutes: int = 30) -> int:
+    """
+    Mark queued/running/retrying tasks as failed when they have not been updated
+    for a long time, preventing permanent "pending/running" UI states.
+    """
+    try:
+        from finder.shared.database import _USE_POSTGRES
+        with transaction() as conn:
+            if _USE_POSTGRES:
+                exists = conn.execute("SELECT to_regclass('public.task_status') AS t").fetchone()
+                exists_val = None
+                if exists:
+                    try:
+                        exists_val = exists.get("t")
+                    except Exception:
+                        try:
+                            exists_val = exists["t"]
+                        except Exception:
+                            exists_val = None
+                if not exists_val:
+                    return 0
+            else:
+                exists = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='task_status'"
+                ).fetchone()
+                if not exists:
+                    return 0
+
+            if _USE_POSTGRES:
+                cur = conn.execute(
+                    """
+                    UPDATE task_status
+                    SET status='failed',
+                        failure_reason='stale task watchdog timeout',
+                        completed_at=CURRENT_TIMESTAMP,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE status IN ('queued','running','retrying')
+                      AND updated_at < (CURRENT_TIMESTAMP - (? || ' minutes')::interval)
+                    """,
+                    (str(int(stale_minutes)),),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    UPDATE task_status
+                    SET status='failed',
+                        failure_reason='stale task watchdog timeout',
+                        completed_at=CURRENT_TIMESTAMP,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE status IN ('queued','running','retrying')
+                      AND updated_at < datetime('now', ?)
+                    """,
+                    (f"-{int(stale_minutes)} minutes",),
+                )
+            return int(getattr(cur, "rowcount", 0) or 0)
+    except Exception as e:
+        log.error("Failed stale task watchdog: %s", e)
+        return 0

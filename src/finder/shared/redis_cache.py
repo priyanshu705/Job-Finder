@@ -23,7 +23,6 @@ import logging
 import os
 import json
 from typing import Any, Optional, Dict
-from datetime import timedelta
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +93,7 @@ class RedisCache:
             raise
     
     def _make_key(self, namespace: str, identifier: str) -> str:
-        \"\"\"
+        """
         Create a namespaced Redis key.
         
         Args:
@@ -103,7 +102,7 @@ class RedisCache:
             
         Returns:
             Full namespaced key
-        \"\"\"
+        """
         prefix = self.NAMESPACE.get(namespace, f"autoapply:{namespace}:")
         # Sanitize identifier to ensure valid Redis key
         sanitized = str(identifier).replace(" ", "_").replace("|", "_")
@@ -115,7 +114,7 @@ class RedisCache:
         identifier: str,
         default: Any = None
     ) -> Any:
-        \"\"\"
+        """
         Retrieve a cached value.
         
         Args:
@@ -125,7 +124,7 @@ class RedisCache:
             
         Returns:
             Cached value or default
-        \"\"\"
+        """
         if not self._available:
             return default
         
@@ -154,7 +153,7 @@ class RedisCache:
         value: Any,
         ttl_seconds: Optional[int] = None
     ) -> bool:
-        \"\"\"
+        """
         Store a value in cache.
         
         Args:
@@ -165,7 +164,7 @@ class RedisCache:
             
         Returns:
             True if successful, False otherwise
-        \"\"\"
+        """
         if not self._available:
             return False
         
@@ -237,7 +236,7 @@ class RedisCache:
             
         Returns:
             Number of keys deleted
-        \"\"\"
+        """
         if not self._available:
             return 0
         
@@ -259,7 +258,7 @@ class RedisCache:
             return 0
     
     def exists(self, namespace: str, identifier: str) -> bool:
-        \"\"\"Check if a cache entry exists.\"\"\"
+        """Check if a cache entry exists."""
         if not self._available:
             return False
         
@@ -271,7 +270,7 @@ class RedisCache:
             return False
     
     def increment(self, namespace: str, identifier: str, amount: int = 1) -> int:
-        \"\"\"Increment a numeric cache value.\"\"\"
+        """Increment a numeric cache value."""
         if not self._available:
             return 0
         
@@ -283,7 +282,7 @@ class RedisCache:
             return 0
     
     def append(self, namespace: str, identifier: str, value: Any) -> bool:
-        \"\"\"Append to a list in cache.\"\"\"
+        """Append to a list in cache."""
         if not self._available:
             return False
         
@@ -302,7 +301,7 @@ class RedisCache:
             return False
     
     def get_list(self, namespace: str, identifier: str) -> list:
-        \"\"\"Get all items from a list in cache.\"\"\"
+        """Get all items from a list in cache."""
         if not self._available:
             return []
         
@@ -324,7 +323,7 @@ class RedisCache:
             return []
     
     def clear_namespace(self, namespace: str) -> int:
-        \"\"\"Clear all keys in a namespace.\"\"\"
+        """Clear all keys in a namespace."""
         if not self._available:
             return 0
         
@@ -342,7 +341,7 @@ class RedisCache:
             return 0
     
     def health_check(self) -> Dict[str, Any]:
-        \"\"\"Check Redis health.\"\"\"
+        """Check Redis health."""
         if not self._available:
             return {"status": "unavailable"}
         
@@ -363,7 +362,7 @@ _cache = None
 
 
 def get_cache() -> RedisCache:
-    \"\"\"Get or create global Redis cache instance.\"\"\"
+    """Get or create global Redis cache instance."""
     global _cache
     if _cache is None:
         _cache = RedisCache()
@@ -372,15 +371,16 @@ def get_cache() -> RedisCache:
 
 # Convenience functions
 def cache_get(namespace: str, identifier: str, default: Any = None) -> Any:
-    \"\"\"Convenience function to get from cache.\"\"\"
+    """Convenience function to get from cache."""
     return get_cache().get(namespace, identifier, default)
 
 
 def cache_set(namespace: str, identifier: str, value: Any, ttl_seconds: Optional[int] = None) -> bool:
-    \"\"\"Convenience function to set in cache.\"\"\"
+    """Convenience function to set in cache."""
     return get_cache().set(namespace, identifier, value, ttl_seconds)
 
 
 def cache_delete(namespace: str, identifier: str) -> bool:
-    \"\"\"Convenience function to delete from cache.\"\"\"
+    """Convenience function to delete from cache."""
     return get_cache().delete(namespace, identifier)
+

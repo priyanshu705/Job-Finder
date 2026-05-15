@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta
 from finder.shared.celery_app import celery_app
 from finder.shared.database import get_db
+from finder.shared.task_tracker import mark_stale_tasks_failed
 
 log = logging.getLogger("cleanup_tasks")
 
@@ -44,7 +45,19 @@ def task_cleanup_cache(self):
                 "DELETE FROM user_controls WHERE key LIKE 'snapshot_%' AND updated_at < ?",
                 (fourteen_days_ago,)
             )
-            
+
+            # 4. Promote pending jobs that were already scored to avoid stuck queue entries
+            conn.execute(
+                """
+                UPDATE apply_queue
+                SET status='ready_to_apply', updated_at=CURRENT_TIMESTAMP
+                WHERE status='pending' AND match_score_at_apply IS NOT NULL
+                """
+            )
+
+        # 5. Mark stale queued/running background tasks as failed (watchdog recovery)
+        mark_stale_tasks_failed(stale_minutes=30)
+
         log.info("Cache cleanup completed successfully.")
         return True
     except Exception as exc:

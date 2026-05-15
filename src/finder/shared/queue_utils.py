@@ -3,7 +3,7 @@ src/finder/shared/queue_utils.py
 --------------------------------
 Queue utilities, like resetting active queue elements after resume updates.
 """
-from finder.shared.database import get_db, transaction
+from finder.shared.database import transaction
 from finder.shared.logging import get_logger
 
 log = get_logger("queue_utils")

@@ -1,10 +1,9 @@
-// src/finder/core/ai/base_provider.py
+# src/finder/core/ai/base_provider.py
 """Abstract base class for AI providers.
 All providers must implement a `generate` method returning the raw response string.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
 
 class BaseProvider(ABC):
     @abstractmethod
@@ -14,3 +13,4 @@ class BaseProvider(ABC):
         provider‑specific logic.
         """
         raise NotImplementedError
+

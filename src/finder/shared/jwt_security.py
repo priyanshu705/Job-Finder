@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
 
 import jwt
-from flask import request, make_response
+from flask import request
 from dotenv import load_dotenv
 
 load_dotenv()

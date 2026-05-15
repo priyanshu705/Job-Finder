@@ -11,7 +11,6 @@ import os
 import hashlib
 import time
 import logging
-from datetime import date
 from typing import Optional
 
 log = logging.getLogger("gemini_provider")

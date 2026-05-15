@@ -6,7 +6,6 @@ Supports SQLite (dev) and PostgreSQL/Supabase (production).
 """
 
 import os
-import logging
 from finder.shared.logger import get_logger
 
 log = get_logger("db")
@@ -480,6 +479,20 @@ def init_db():
             created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
+        CREATE TABLE IF NOT EXISTS task_status (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id        TEXT UNIQUE NOT NULL,
+            task_type      TEXT NOT NULL,
+            status         TEXT NOT NULL DEFAULT 'queued',
+            payload        TEXT,
+            retry_count    INTEGER DEFAULT 0,
+            failure_reason TEXT,
+            started_at     DATETIME,
+            completed_at   DATETIME,
+            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS resume_versions (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id        INTEGER DEFAULT 1,
@@ -554,6 +567,8 @@ def init_db():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_apply_score  ON apply_queue(match_score_at_apply)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_apply_queued ON apply_queue(queued_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_scraped ON jobs(scraped_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_status_task_id ON task_status(task_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_status_status ON task_status(status)")
             # Deduplicate stale rows
             conn.execute("""
                 DELETE FROM apply_queue
@@ -578,6 +593,8 @@ def _pg_indexes(cur):
         "CREATE INDEX IF NOT EXISTS idx_apply_score  ON apply_queue(match_score_at_apply)",
         "CREATE INDEX IF NOT EXISTS idx_apply_queued ON apply_queue(queued_at)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_scraped ON jobs(scraped_at)",
+        "CREATE INDEX IF NOT EXISTS idx_task_status_task_id ON task_status(task_id)",
+        "CREATE INDEX IF NOT EXISTS idx_task_status_status ON task_status(status)",
     ]:
         try:
             cur.execute(ddl)

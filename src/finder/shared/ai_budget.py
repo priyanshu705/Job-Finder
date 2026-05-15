@@ -15,8 +15,7 @@ Features:
 """
 
 import logging
-import os
-from datetime import datetime, date, timedelta, timezone
+from datetime import date
 from typing import Optional, Dict, Any
 
 from finder.shared.db_abstraction import (
@@ -24,7 +23,6 @@ from finder.shared.db_abstraction import (
     db_fetch_one,
     db_fetch_all,
     db_count,
-    db_table_exists,
 )
 from finder.shared.database import _USE_POSTGRES
 

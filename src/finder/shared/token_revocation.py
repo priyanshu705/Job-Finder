@@ -10,7 +10,6 @@ Manages revoked JWT tokens to support:
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import List, Optional
 
 from finder.shared.db_abstraction import (
@@ -18,8 +17,6 @@ from finder.shared.db_abstraction import (
     db_fetch_all,
     db_fetch_one,
     db_count,
-    db_table_exists,
-    db_add_column,
 )
 from finder.shared.database import _USE_POSTGRES
 

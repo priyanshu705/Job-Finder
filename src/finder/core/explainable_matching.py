@@ -13,7 +13,6 @@ Formula:
               + 0.10(hiring_signals)
 """
 
-import json
 import logging
 from typing import Dict, List, Tuple
 from dataclasses import dataclass, asdict

@@ -35,8 +35,18 @@ def make_celery(app_name=__name__):
         broker_connection_retry_on_startup=True,
         task_acks_late=True,
         task_reject_on_worker_lost=True,
+        task_track_started=True,
+        worker_cancel_long_running_tasks_on_connection_loss=True,
+        broker_transport_options={
+            # Re-queue unacked tasks if a worker disappears.
+            "visibility_timeout": int(os.getenv("CELERY_VISIBILITY_TIMEOUT", "3600")),
+            "socket_timeout": int(os.getenv("CELERY_SOCKET_TIMEOUT", "30")),
+            "socket_connect_timeout": int(os.getenv("CELERY_SOCKET_CONNECT_TIMEOUT", "10")),
+        },
         # Performance
         worker_prefetch_multiplier=1,
+        worker_max_tasks_per_child=int(os.getenv("CELERY_MAX_TASKS_PER_CHILD", "100")),
+        worker_max_memory_per_child=int(os.getenv("CELERY_MAX_MEMORY_PER_CHILD_KB", "512000")),
     )
     
     return celery

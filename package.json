@@ -1,9 +1,0 @@
-{
-  "name": "autoapply-ai-deploy",
-  "private": true,
-  "scripts": {
-    "build": "npm run build --prefix finder-ui",
-    "vercel-build": "npm run build --prefix finder-ui",
-    "install:frontend": "npm ci --prefix finder-ui"
-  }
-}

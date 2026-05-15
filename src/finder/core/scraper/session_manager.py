@@ -8,7 +8,6 @@ Prevents constant re-logins and protects session artifacts.
 
 import os
 import json
-import base64
 import logging
 from cryptography.fernet import Fernet
 from finder.shared.database import get_db

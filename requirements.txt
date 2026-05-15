@@ -33,7 +33,6 @@ docx2txt==0.8
 celery[redis]==5.4.0
 redis==5.0.4
 flask-socketio==5.3.6
-eventlet==0.36.1
 
 # ── Scale & Scraper Safety (Phase D) ──────────────────────────────────────────
 cryptography==42.0.5

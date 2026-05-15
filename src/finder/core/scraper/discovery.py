@@ -13,6 +13,7 @@ from finder.core.scraper.health import SourceHealthTracker
 from finder.core.scraper.normalization import canonicalize_url
 from finder.core.scraper.fingerprint import get_random_fingerprint
 from finder.shared.database import get_db
+from finder.shared.browser_safety import close_quietly, reap_orphan_browser_children
 
 log = logging.getLogger("discovery")
 
@@ -34,6 +35,9 @@ def run_discovery_scrapers(headless: bool = True):
     results = {}
     with sync_playwright() as p:
         for platform in platforms:
+            browser = None
+            context = None
+            page = None
             scraper = get_scraper(platform)
             log.info(f"Starting discovery scraper for {platform}")
 
@@ -124,8 +128,9 @@ def run_discovery_scrapers(headless: bool = True):
                 duration = __import__('time').time() - start_time
                 SourceHealthTracker.record_scrape(platform, success=True, jobs_found=total_jobs_found, duration_seconds=duration)
                 
-                context.close()
-                browser.close()
+                for closable in (page, context, browser):
+                    close_quietly(closable)
+                reap_orphan_browser_children()
                 
             results[platform] = {"jobs_found": total_jobs_found}
             

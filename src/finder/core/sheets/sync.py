@@ -5,8 +5,7 @@ Google Sheets Sync — AutoApply AI.
 """
 
 import os
-import json
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime
 from typing import Optional
 
 from dotenv import load_dotenv

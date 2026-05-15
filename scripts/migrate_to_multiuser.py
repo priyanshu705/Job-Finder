@@ -5,7 +5,6 @@ This handles data migration from single-user to multi-user architecture.
 
 import sqlite3
 import os
-from datetime import datetime
 import logging
 
 log = logging.getLogger(__name__)
@@ -24,7 +23,20 @@ def migrate_to_multiuser():
     This is safe to run multiple times (idempotent).
     """
     
-    db_path = os.getenv("DATABASE_URL", "jobs.db")
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url.startswith("postgresql://") or db_url.startswith("postgres://"):
+        log.info("Skipping sqlite migration in PostgreSQL mode")
+        return False
+
+    if db_url.startswith("sqlite:///"):
+        db_path = db_url.replace("sqlite:///", "", 1)
+    else:
+        db_path = db_url or os.path.join("data", "finder.db")
+
+    db_dir = os.path.dirname(os.path.abspath(db_path))
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     

@@ -21,10 +21,10 @@ Features:
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, Callable
+from typing import Callable
 from enum import Enum
 
-from finder.shared.db_abstraction import db_execute, db_fetch_one, db_fetch_all
+from finder.shared.db_abstraction import db_execute, db_fetch_one
 
 log = logging.getLogger(__name__)
 

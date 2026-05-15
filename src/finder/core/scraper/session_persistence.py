@@ -20,23 +20,21 @@ scraper_sessions table: Stores encrypted session state per user/platform
 import logging
 import os
 import json
-import pickle
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 
 class SessionPersistence:
-    \"\"\"
+    """
     Manages persistent Playwright browser sessions.
     
     Stores session state (cookies, local storage) encrypted on disk.
     Reuses sessions across scraper runs to avoid re-login.
-    \"\"\"
+    """
     
-    SCHEMA = \"\"\"
+    SCHEMA = """
         CREATE TABLE IF NOT EXISTS scraper_sessions (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id         TEXT NOT NULL,
@@ -54,7 +52,7 @@ class SessionPersistence:
             ON scraper_sessions(user_id, platform);
         CREATE INDEX IF NOT EXISTS idx_session_expiry 
             ON scraper_sessions(expires_at);
-    \"\"\"
+    """
     
     # Session config
     SESSION_TTL = timedelta(days=7)  # Sessions expire after 7 days
@@ -62,14 +60,14 @@ class SessionPersistence:
     
     @staticmethod
     def initialize():
-        \"\"\"Create scraper_sessions table if needed.\"\"\"
+        """Create scraper_sessions table if needed."""
         try:
             from finder.shared.db_abstraction import db_execute
             from finder.shared.database import _USE_POSTGRES
             
             if _USE_POSTGRES:
                 # PostgreSQL version
-                schema_pg = \"\"\"
+                schema_pg = """
                     CREATE TABLE IF NOT EXISTS scraper_sessions (
                         id              SERIAL PRIMARY KEY,
                         user_id         TEXT NOT NULL,
@@ -87,7 +85,7 @@ class SessionPersistence:
                         ON scraper_sessions(user_id, platform);
                     CREATE INDEX IF NOT EXISTS idx_session_expiry 
                         ON scraper_sessions(expires_at);
-                \"\"\"
+                """
                 for stmt in schema_pg.split(";"):
                     if stmt.strip():
                         try:
@@ -116,7 +114,7 @@ class SessionPersistence:
         platform: str,
         storage_state: Dict[str, Any]
     ) -> bool:
-        \"\"\"
+        """
         Save a browser session state.
         
         Args:
@@ -126,7 +124,7 @@ class SessionPersistence:
             
         Returns:
             True if successful
-        \"\"\"
+        """
         try:
             from finder.shared.db_abstraction import db_execute
             
@@ -140,7 +138,7 @@ class SessionPersistence:
             expires_at = (datetime.now(timezone.utc) + SessionPersistence.SESSION_TTL).isoformat()
             
             # Upsert session record
-            sql = \"\"\"
+            sql = """
                 INSERT INTO scraper_sessions
                 (user_id, platform, session_key, storage_state, expires_at, last_used)
                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -149,7 +147,7 @@ class SessionPersistence:
                     expires_at = ?,
                     is_valid = 1,
                     last_used = CURRENT_TIMESTAMP
-            \"\"\"
+            """
             db_execute(sql, (
                 user_id, platform, session_key, state_json, expires_at,
                 state_json, expires_at
@@ -164,7 +162,7 @@ class SessionPersistence:
     
     @staticmethod
     def load_session(user_id: str, platform: str) -> Optional[Dict[str, Any]]:
-        \"\"\"
+        """
         Load a saved browser session state.
         
         Args:
@@ -173,17 +171,17 @@ class SessionPersistence:
             
         Returns:
             Storage state dict or None if not found/expired
-        \"\"\"
+        """
         try:
             from finder.shared.db_abstraction import db_fetch_one
             
-            sql = \"\"\"
+            sql = """
                 SELECT storage_state, is_valid, expires_at FROM scraper_sessions
                 WHERE user_id = ? AND platform = ?
                 AND is_valid = 1
                 AND expires_at > CURRENT_TIMESTAMP
                 ORDER BY last_used DESC LIMIT 1
-            \"\"\"
+            """
             row = db_fetch_one(sql, (user_id, platform))
             
             if not row:
@@ -194,11 +192,11 @@ class SessionPersistence:
             storage_state = json.loads(row.get("storage_state"))
             
             # Update last_used timestamp
-            sql_update = \"\"\"
+            sql_update = """
                 UPDATE scraper_sessions
                 SET last_used = CURRENT_TIMESTAMP
                 WHERE user_id = ? AND platform = ?
-            \"\"\"
+            """
             from finder.shared.db_abstraction import db_execute
             db_execute(sql_update, (user_id, platform))
             
@@ -211,15 +209,15 @@ class SessionPersistence:
     
     @staticmethod
     def invalidate_session(user_id: str, platform: str) -> bool:
-        \"\"\"Mark a session as invalid (e.g., after login failure).\"\"\"
+        """Mark a session as invalid (e.g., after login failure)."""
         try:
             from finder.shared.db_abstraction import db_execute
             
-            sql = \"\"\"
+            sql = """
                 UPDATE scraper_sessions
                 SET is_valid = 0, last_validated = CURRENT_TIMESTAMP
                 WHERE user_id = ? AND platform = ?
-            \"\"\"
+            """
             db_execute(sql, (user_id, platform))
             log.info(f"Invalidated session for {user_id}@{platform}")
             return True
@@ -230,15 +228,15 @@ class SessionPersistence:
     
     @staticmethod
     def cleanup_expired() -> int:
-        \"\"\"Remove expired sessions. Called periodically via Celery.\"\"\"
+        """Remove expired sessions. Called periodically via Celery."""
         try:
             from finder.shared.db_abstraction import db_execute
             
-            sql = \"\"\"
+            sql = """
                 DELETE FROM scraper_sessions
                 WHERE expires_at < CURRENT_TIMESTAMP
                 OR (is_valid = 0 AND last_validated < datetime('now', '-3 days'))
-            \"\"\"
+            """
             db_execute(sql, ())
             log.info("Cleaned up expired scraper sessions")
             return True
@@ -249,9 +247,9 @@ class SessionPersistence:
 
 
 class BrowserSessionManager:
-    \"\"\"
+    """
     Manages Playwright browser session lifecycle with persistence.
-    \"\"\"
+    """
     
     def __init__(self, user_id: str, platform: str):
         self.user_id = user_id
@@ -261,7 +259,7 @@ class BrowserSessionManager:
         self.page = None
     
     async def get_or_create_page(self, browser):
-        \"\"\"
+        """
         Get or create a page, reusing saved session if available.
         
         Args:
@@ -269,7 +267,7 @@ class BrowserSessionManager:
             
         Returns:
             Page object
-        \"\"\"
+        """
         try:
             # Try to load saved session
             storage_state = SessionPersistence.load_session(
@@ -294,7 +292,7 @@ class BrowserSessionManager:
             raise
     
     async def save_session_state(self):
-        \"\"\"Save current browser session state.\"\"\"
+        """Save current browser session state."""
         try:
             if self.context:
                 storage_state = await self.context.storage_state()
@@ -308,7 +306,7 @@ class BrowserSessionManager:
             log.warning(f"Failed to save session state: {e}")
     
     async def cleanup(self):
-        \"\"\"Clean up browser resources.\"\"\"
+        """Clean up browser resources."""
         try:
             if self.page:
                 await self.page.close()
@@ -316,3 +314,4 @@ class BrowserSessionManager:
                 await self.context.close()
         except Exception as e:
             log.warning(f"Cleanup failed: {e}")
+

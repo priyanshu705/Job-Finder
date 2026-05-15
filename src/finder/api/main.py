@@ -16,7 +16,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 from finder.shared.database import get_db, _USE_POSTGRES, init_db
-from finder.shared.config import LOGS_DIR, RESUME_PATH
+from finder.shared.config import LOGS_DIR
 from finder.core.agent import run_agent_cycle
 from finder.api.sockets import socketio
 from finder.api.auth import auth_bp
@@ -36,6 +36,15 @@ try:
     migrate_to_multiuser()
 except Exception as e:
     log.warning(f"Multi-user migration skipped: {e}")
+
+# Recover stale background task records on startup.
+try:
+    from finder.shared.task_tracker import mark_stale_tasks_failed
+    stale_fixed = mark_stale_tasks_failed(stale_minutes=int(os.getenv("STALE_TASK_MINUTES", "30")))
+    if stale_fixed:
+        log.warning("Recovered %s stale task_status rows", stale_fixed)
+except Exception as e:
+    log.warning("Stale task watchdog startup pass skipped: %s", e)
 
 # Register blueprints
 app.register_blueprint(auth_bp)
@@ -223,7 +232,7 @@ def health_redis():
         redis_ok = ping_res is not None
         return jsonify({"status": "healthy" if redis_ok else "degraded", "ping_response": ping_res}), 200
     except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
+        return jsonify({"status": "degraded", "error": str(e)}), 200
 
 @app.route("/api/health/celery")
 def health_celery():
@@ -239,7 +248,7 @@ def health_celery():
             "reserved_tasks": reserved
         }), 200
     except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
+        return jsonify({"status": "degraded", "workers_alive": False, "error": str(e)}), 200
 
 @app.route("/api/health/scraper")
 def health_scraper():
@@ -283,11 +292,10 @@ def debug_ai():
         circuit_active = cache.get("ai", "circuit_breaker_active")
         circuit_fails = cache.get("ai", "circuit_breaker_fails") or 0
         
-        with get_db() as conn:
-            # Audit the DLQ (Dead Letter Queue)
-            dlq_count = q1("SELECT COUNT(*) as c FROM task_failure_audit").get("c", 0)
-            reasoning_cached = q1("SELECT COUNT(*) as c FROM reasoning_cache").get("c", 0)
-            embeddings_cached = q1("SELECT COUNT(*) as c FROM embedding_cache").get("c", 0)
+        # Audit the DLQ (Dead Letter Queue)
+        dlq_count = q1("SELECT COUNT(*) as c FROM task_failure_audit").get("c", 0)
+        reasoning_cached = q1("SELECT COUNT(*) as c FROM reasoning_cache").get("c", 0)
+        embeddings_cached = q1("SELECT COUNT(*) as c FROM embedding_cache").get("c", 0)
             
         return jsonify({
             "circuit_breaker": {
@@ -1119,8 +1127,6 @@ def generate_followup():
     job_url   = data.get("job_url", "")
     job_title = data.get("job_title", "")
     company   = data.get("company", "")
-    days      = int(data.get("days_since_apply", 7))
-
     if not job_url:
         return jsonify({"error": "job_url required"}), 400
 

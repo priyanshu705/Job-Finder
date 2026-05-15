@@ -4,9 +4,6 @@ src/finder/core/intelligence/engine.py
 Intelligence & Learning Engine — AutoApply AI.
 """
 
-import os
-import json
-import re
 from datetime import datetime, timezone, date, timedelta
 from collections import defaultdict
 

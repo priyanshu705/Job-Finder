@@ -21,20 +21,15 @@ Guarantees:
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import List, Dict
 
 from finder.shared.db_abstraction import (
     db_execute,
-    db_fetch_all,
     db_fetch_one,
     db_count,
     db_column_exists,
-    db_add_column,
     db_table_exists,
-    db_transaction,
 )
-from finder.shared.database import _USE_POSTGRES
 
 log = logging.getLogger(__name__)
 

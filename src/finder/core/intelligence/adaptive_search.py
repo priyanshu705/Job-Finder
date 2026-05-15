@@ -1,5 +1,4 @@
 import sqlite3
-from datetime import datetime
 from finder.shared.database import get_db
 from finder.shared.logger import get_logger
 from finder.core.intelligence.profile import detect_roles, get_user_skills

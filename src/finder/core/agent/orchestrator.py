@@ -9,11 +9,12 @@ import os
 import json
 import time
 import traceback
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone
 
 from finder.shared.logger import get_logger
 from finder.shared.database import get_db, get_table_counts
-from finder.shared.metrics import get_summary, record_metric
+from finder.shared.metrics import get_summary
+from finder.shared.browser_safety import close_quietly, reap_orphan_browser_children
 
 # Phase Imports
 from finder.core.scraper import run_scraper
@@ -87,6 +88,9 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
     }
 
     with sync_playwright() as pw:
+        browser = None
+        context = None
+        page = None
         # Launch browser once
         log.info(f"Launching browser (headless={headless})...")
         _report("init", "Launching browser...", "Launching browser session")
@@ -213,7 +217,9 @@ def run_agent_cycle(query="", scraper_pages=0, headless=True, report_callback=No
             log.error(traceback.format_exc())
             _report("error", "Critical failure", f"💥 Critical Failure: {e}")
         finally:
-            browser.close()
+            for closable in (page, context, browser):
+                close_quietly(closable)
+            reap_orphan_browser_children()
             results["finished_at"] = datetime.now(timezone.utc).isoformat()
             results["duration_s"] = int(time.time() - start_time)
             
