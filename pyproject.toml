@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finder"
+version = "1.0.0"
+description = "Job Finder AI Application"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "flask==3.0.3",
+    "flask-cors==4.0.0",
+    "flask-jwt-extended==4.6.0",
+    "gunicorn==22.0.0",
+    "psycopg2-binary==2.9.9",
+    "python-dotenv==1.0.1",
+    "beautifulsoup4==4.12.3",
+    "requests==2.32.3",
+    "gspread==6.0.2",
+    "google-auth==2.29.0",
+    "playwright==1.42.0",
+    "pdfplumber==0.11.0",
+    "docx2txt==0.8",
+    "celery[redis]==5.4.0",
+    "redis==5.0.4",
+    "cryptography==42.0.5",
+    "psutil==5.9.8",
+    "google-generativeai==0.5.2",
+]
+
+[tool.setuptools]
+packages = ["finder"]
+
+[tool.setuptools.package-dir]
+"" = "src"
